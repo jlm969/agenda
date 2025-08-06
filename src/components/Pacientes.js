@@ -24,7 +24,15 @@ const Pacientes = ({
   const [isDeleteConfirmationModalOpen, setIsDeleteConfirmationModalOpen] = useState(false);
   const [patientToDeleteIndex, setPatientToDeleteIndex] = useState(null);
 
-  // Objeto para traducir el estado de los turnos a español
+  const [historialClinico, setHistorialClinico] = useState({
+    edad: "",
+    antecedentesPersonales: "",
+    antecedentesFamiliares: "",
+    medicacionHabitual: "",
+    alergias: "",
+    observaciones: "",
+  });
+
   const statusTranslations = {
     pending: "Pendiente",
     confirmed: "Confirmado",
@@ -32,7 +40,6 @@ const Pacientes = ({
     completed: "Finalizado",
   };
 
-  // Funciones para el modal de Creación/Edición de Pacientes
   const handleOpenPatientModal = (index = null) => {
     if (index !== null) {
       editPatient(index);
@@ -54,7 +61,6 @@ const Pacientes = ({
     handleClosePatientModal();
   };
 
-  // Funciones para el modal de confirmación de eliminación
   const handleDeletePatientClick = (index) => {
     setPatientToDeleteIndex(index);
     setIsDeleteConfirmationModalOpen(true);
@@ -71,27 +77,49 @@ const Pacientes = ({
     setPatientToDeleteIndex(null);
   };
 
-  // Funciones para el modal del Historial Clínico
   const handleOpenHistory = (patientIndex) => {
-    setSelectedPatient(patients[patientIndex]);
+    const patient = patients[patientIndex];
+    setSelectedPatient(patient);
+    setHistorialClinico(patient.historialClinico || {
+      edad: "",
+      antecedentesPersonales: "",
+      antecedentesFamiliares: "",
+      medicacionHabitual: "",
+      alergias: "",
+      observaciones: "",
+    });
     setHistoryModalOpen(true);
   };
 
   const handleCloseHistory = () => {
     setHistoryModalOpen(false);
     setSelectedPatient(null);
+    setHistorialClinico({
+      edad: "",
+      antecedentesPersonales: "",
+      antecedentesFamiliares: "",
+      medicacionHabitual: "",
+      alergias: "",
+      observaciones: "",
+    });
+  };
+
+  const handleHistorialChange = (e) => {
+    const { id, value } = e.target;
+    setHistorialClinico(prevHistorial => ({
+      ...prevHistorial,
+      [id]: value,
+    }));
   };
 
   const handleSaveHistory = () => {
     if (selectedPatient) {
       const patientIndex = patients.findIndex(p => p.email === selectedPatient.email);
-      const updatedHistory = document.getElementById("historiaClinicaTextarea").value;
-      updatePatient(patientIndex, { historiaClinica: updatedHistory });
+      updatePatient(patientIndex, { historialClinico: historialClinico });
       handleCloseHistory();
     }
   };
 
-  // Funciones para el modal de Historial de Turnos y Tratamientos
   const handleViewTreatmentHistory = (patientIndex) => {
     const patient = patients[patientIndex];
     const patientAppointments = appointments.filter(
@@ -109,7 +137,6 @@ const Pacientes = ({
   return (
     <div className="bg-white p-6 rounded-2xl shadow-lg">
       <h2 className="text-2xl font-semibold text-pink-600 mb-4">Gestión de Pacientes</h2>
-
       <div className="flex justify-between mb-6 items-center">
         <button
           onClick={() => handleOpenPatientModal()}
@@ -308,32 +335,84 @@ const Pacientes = ({
         </div>
       </Modal>
 
-      {/* Modal para el Historial Clínico */}
+      {/* Modal para el Historial Clínico (ACTUALIZADO) */}
       <Modal
-        title="Historia Clínica"
+        title={`Historia Clínica de ${selectedPatient?.name}`}
         isOpen={historyModalOpen}
         onClose={handleCloseHistory}
       >
         {selectedPatient && (
-          <div>
-            <h3 className="text-xl font-bold mb-4">{selectedPatient.name}</h3>
-            <textarea
-              id="historiaClinicaTextarea"
-              className="w-full h-48 p-2 border rounded-lg resize-none"
-              defaultValue={selectedPatient.historiaClinica}
-              placeholder="Escribe aquí el historial clínico del paciente (alergias, antecedentes, etc.)..."
-            />
+          <div className="space-y-4">
+            <div className="flex items-center space-x-2">
+              <label htmlFor="edad" className="font-semibold text-gray-700">Edad:</label>
+              <input
+                type="text"
+                id="edad"
+                className="border p-2 rounded flex-grow"
+                value={historialClinico.edad}
+                onChange={handleHistorialChange}
+              />
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <label htmlFor="antecedentesPersonales" className="font-semibold text-gray-700 whitespace-nowrap">Antecedentes Personales:</label>
+              <input
+                type="text"
+                id="antecedentesPersonales"
+                className="border p-2 rounded flex-grow"
+                value={historialClinico.antecedentesPersonales}
+                onChange={handleHistorialChange}
+              />
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <label htmlFor="antecedentesFamiliares" className="font-semibold text-gray-700 whitespace-nowrap">Antecedentes Familiares:</label>
+              <input
+                type="text"
+                id="antecedentesFamiliares"
+                className="border p-2 rounded flex-grow"
+                value={historialClinico.antecedentesFamiliares}
+                onChange={handleHistorialChange}
+              />
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <label htmlFor="medicacionHabitual" className="font-semibold text-gray-700 whitespace-nowrap">Medicación Habitual:</label>
+              <input
+                type="text"
+                id="medicacionHabitual"
+                className="border p-2 rounded flex-grow"
+                value={historialClinico.medicacionHabitual}
+                onChange={handleHistorialChange}
+              />
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <label htmlFor="alergias" className="font-semibold text-gray-700 whitespace-nowrap">Alergias:</label>
+              <input
+                type="text"
+                id="alergias"
+                className="border p-2 rounded flex-grow"
+                value={historialClinico.alergias}
+                onChange={handleHistorialChange}
+              />
+            </div>
+
+            <div className="flex items-start space-x-2">
+              <label htmlFor="observaciones" className="font-semibold text-gray-700 whitespace-nowrap pt-2">Observaciones:</label>
+              <textarea
+                id="observaciones"
+                className="border p-2 rounded flex-grow min-h-[40px]" // `min-h-[40px]` asegura que ocupe un renglón por defecto
+                value={historialClinico.observaciones}
+                onChange={handleHistorialChange}
+              />
+            </div>
+
             <div className="flex justify-end mt-4">
-              <button
-                onClick={handleCloseHistory}
-                className="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 mr-2"
-              >
+              <button onClick={handleCloseHistory} className="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 mr-2">
                 Cerrar
               </button>
-              <button
-                onClick={handleSaveHistory}
-                className="bg-pink-500 text-white px-4 py-2 rounded-lg hover:bg-pink-600"
-              >
+              <button onClick={handleSaveHistory} className="bg-pink-500 text-white px-4 py-2 rounded-lg hover:bg-pink-600">
                 Guardar Cambios
               </button>
             </div>
