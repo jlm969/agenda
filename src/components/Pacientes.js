@@ -1,5 +1,43 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import Modal from "./Modal";
+import { useReactToPrint } from "react-to-print";
+import { AiOutlinePrinter } from "react-icons/ai";
+
+// Componente para imprimir el historial clínico
+const PrintableHistorial = React.forwardRef(({ patient, historial }, ref) => {
+  if (!patient || !historial) return null;
+  return (
+    <div ref={ref} className="p-8">
+      <h1 className="text-2xl font-bold text-center mb-6">Historial Clínico de {patient.name}</h1>
+      <div className="space-y-4">
+        <div className="flex items-center">
+          <span className="font-semibold text-gray-700 w-1/3">Edad:</span>
+          <span className="ml-2 w-2/3">{historial.edad}</span>
+        </div>
+        <div className="flex items-start">
+          <span className="font-semibold text-gray-700 w-1/3">Antecedentes Personales:</span>
+          <span className="ml-2 w-2/3 break-words">{historial.antecedentesPersonales}</span>
+        </div>
+        <div className="flex items-start">
+          <span className="font-semibold text-gray-700 w-1/3">Antecedentes Familiares:</span>
+          <span className="ml-2 w-2/3 break-words">{historial.antecedentesFamiliares}</span>
+        </div>
+        <div className="flex items-start">
+          <span className="font-semibold text-gray-700 w-1/3">Medicación Habitual:</span>
+          <span className="ml-2 w-2/3 break-words">{historial.medicacionHabitual}</span>
+        </div>
+        <div className="flex items-start">
+          <span className="font-semibold text-gray-700 w-1/3">Alergias:</span>
+          <span className="ml-2 w-2/3 break-words">{historial.alergias}</span>
+        </div>
+        <div className="flex items-start">
+          <span className="font-semibold text-gray-700 w-1/3">Observaciones:</span>
+          <p className="mt-1 w-2/3 break-words">{historial.observaciones}</p>
+        </div>
+      </div>
+    </div>
+  );
+});
 
 const Pacientes = ({
   patients,
@@ -22,7 +60,7 @@ const Pacientes = ({
   const [treatmentHistoryModalOpen, setTreatmentHistoryModalOpen] = useState(false);
   const [selectedPatientAppointments, setSelectedPatientAppointments] = useState([]);
   const [isDeleteConfirmationModalOpen, setIsDeleteConfirmationModalOpen] = useState(false);
-  const [patientToDeleteIndex, setPatientToDeleteIndex] = useState(null);
+  const [patientToDelete, setPatientToDelete] = useState(null);
 
   const [historialClinico, setHistorialClinico] = useState({
     edad: "",
@@ -31,6 +69,42 @@ const Pacientes = ({
     medicacionHabitual: "",
     alergias: "",
     observaciones: "",
+  });
+
+  const componentRef = useRef();
+
+  const handlePrint = useReactToPrint({
+    content: () => componentRef.current,
+    documentTitle: `Historial Clínico de ${selectedPatient?.name}`,
+    pageStyle: `
+      @page {
+        size: A4;
+        margin: 20mm;
+      }
+      body {
+        font-family: Arial, sans-serif;
+        font-size: 12px;
+        color: #333;
+      }
+      h1 {
+        text-align: center;
+        margin-bottom: 20px;
+        color: #1a202c;
+      }
+      .print-section {
+        border-bottom: 1px solid #e2e8f0;
+        padding-bottom: 10px;
+        margin-bottom: 10px;
+      }
+      .field-label {
+        font-weight: 600;
+        color: #4a5568;
+      }
+      .field-value {
+        margin-left: 8px;
+        font-style: italic;
+      }
+    `,
   });
 
   const statusTranslations = {
@@ -61,24 +135,26 @@ const Pacientes = ({
     handleClosePatientModal();
   };
 
-  const handleDeletePatientClick = (index) => {
-    setPatientToDeleteIndex(index);
+  const handleDeletePatientClick = (patient) => {
+    setPatientToDelete(patient);
     setIsDeleteConfirmationModalOpen(true);
   };
 
   const handleConfirmDeletePatient = () => {
-    deletePatient(patientToDeleteIndex);
+    const patientIndex = patients.findIndex(p => p.email === patientToDelete.email);
+    if (patientIndex !== -1) {
+      deletePatient(patientIndex);
+    }
     setIsDeleteConfirmationModalOpen(false);
-    setPatientToDeleteIndex(null);
+    setPatientToDelete(null);
   };
 
   const handleCancelDelete = () => {
     setIsDeleteConfirmationModalOpen(false);
-    setPatientToDeleteIndex(null);
+    setPatientToDelete(null);
   };
-
-  const handleOpenHistory = (patientIndex) => {
-    const patient = patients[patientIndex];
+  
+  const handleOpenHistory = (patient) => {
     setSelectedPatient(patient);
     setHistorialClinico(patient.historialClinico || {
       edad: "",
@@ -115,13 +191,14 @@ const Pacientes = ({
   const handleSaveHistory = () => {
     if (selectedPatient) {
       const patientIndex = patients.findIndex(p => p.email === selectedPatient.email);
-      updatePatient(patientIndex, { historialClinico: historialClinico });
+      if (patientIndex !== -1) {
+        updatePatient(patientIndex, { historialClinico: historialClinico });
+      }
       handleCloseHistory();
     }
   };
 
-  const handleViewTreatmentHistory = (patientIndex) => {
-    const patient = patients[patientIndex];
+  const handleViewTreatmentHistory = (patient) => {
     const patientAppointments = appointments.filter(
       (app) => app.patientName === patient.name
     );
@@ -190,7 +267,7 @@ const Pacientes = ({
                 </div>
                 <div className="flex space-x-2">
                   <button
-                    onClick={() => handleViewTreatmentHistory(index)}
+                    onClick={() => handleViewTreatmentHistory(patient)}
                     className="bg-purple-500 text-white px-4 py-2 rounded text-sm hover:bg-purple-600 transition-colors flex items-center space-x-1"
                   >
                     <svg
@@ -208,7 +285,7 @@ const Pacientes = ({
                     <span>Historial</span>
                   </button>
                   <button
-                    onClick={() => handleOpenHistory(index)}
+                    onClick={() => handleOpenHistory(patient)}
                     className="bg-blue-500 text-white px-4 py-2 rounded text-sm hover:bg-blue-600 transition-colors flex items-center space-x-1"
                   >
                     <svg
@@ -244,7 +321,7 @@ const Pacientes = ({
                     <span>Editar</span>
                   </button>
                   <button
-                    onClick={() => handleDeletePatientClick(index)}
+                    onClick={() => handleDeletePatientClick(patient)}
                     className="bg-red-500 text-white px-4 py-2 rounded text-sm hover:bg-red-600 transition-colors flex items-center space-x-1"
                   >
                     <svg
@@ -268,6 +345,11 @@ const Pacientes = ({
             <p className="text-center text-gray-500">No se encontraron pacientes.</p>
           )}
         </ul>
+      </div>
+
+      {/* Componente oculto para la impresión, fuera del Modal */}
+      <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
+        {selectedPatient && <PrintableHistorial ref={componentRef} patient={selectedPatient} historial={historialClinico} />}
       </div>
 
       {/* Modal para Agregar/Editar Paciente */}
@@ -308,7 +390,7 @@ const Pacientes = ({
             />
           </div>
           <div>
-            <label className="block text-gray-700 text-sm font-semibold mb-1">Foto</label>
+            <label className="block w-full text-sm font-semibold text-gray-700 mb-1">Foto</label>
             <input
               type="file"
               onChange={handlePhotoUpload}
@@ -335,7 +417,7 @@ const Pacientes = ({
         </div>
       </Modal>
 
-      {/* Modal para el Historial Clínico (ACTUALIZADO) */}
+      {/* Modal para el Historial Clínico (Ahora solo con los campos de edición) */}
       <Modal
         title={`Historia Clínica de ${selectedPatient?.name}`}
         isOpen={historyModalOpen}
@@ -343,6 +425,7 @@ const Pacientes = ({
       >
         {selectedPatient && (
           <div className="space-y-4">
+            <h4 className="text-xl font-bold mb-4">Editar Historial</h4>
             <div className="flex items-center space-x-2">
               <label htmlFor="edad" className="font-semibold text-gray-700">Edad:</label>
               <input
@@ -353,8 +436,7 @@ const Pacientes = ({
                 onChange={handleHistorialChange}
               />
             </div>
-
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 mt-2">
               <label htmlFor="antecedentesPersonales" className="font-semibold text-gray-700 whitespace-nowrap">Antecedentes Personales:</label>
               <input
                 type="text"
@@ -364,8 +446,7 @@ const Pacientes = ({
                 onChange={handleHistorialChange}
               />
             </div>
-
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 mt-2">
               <label htmlFor="antecedentesFamiliares" className="font-semibold text-gray-700 whitespace-nowrap">Antecedentes Familiares:</label>
               <input
                 type="text"
@@ -375,8 +456,7 @@ const Pacientes = ({
                 onChange={handleHistorialChange}
               />
             </div>
-
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 mt-2">
               <label htmlFor="medicacionHabitual" className="font-semibold text-gray-700 whitespace-nowrap">Medicación Habitual:</label>
               <input
                 type="text"
@@ -386,8 +466,7 @@ const Pacientes = ({
                 onChange={handleHistorialChange}
               />
             </div>
-
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 mt-2">
               <label htmlFor="alergias" className="font-semibold text-gray-700 whitespace-nowrap">Alergias:</label>
               <input
                 type="text"
@@ -397,27 +476,32 @@ const Pacientes = ({
                 onChange={handleHistorialChange}
               />
             </div>
-
-            <div className="flex items-start space-x-2">
+            <div className="flex items-start space-x-2 mt-2">
               <label htmlFor="observaciones" className="font-semibold text-gray-700 whitespace-nowrap pt-2">Observaciones:</label>
               <textarea
                 id="observaciones"
-                className="border p-2 rounded flex-grow min-h-[40px]" // `min-h-[40px]` asegura que ocupe un renglón por defecto
+                className="border p-2 rounded flex-grow min-h-[40px]"
                 value={historialClinico.observaciones}
                 onChange={handleHistorialChange}
               />
             </div>
-
-            <div className="flex justify-end mt-4">
-              <button onClick={handleCloseHistory} className="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 mr-2">
-                Cerrar
-              </button>
-              <button onClick={handleSaveHistory} className="bg-pink-500 text-white px-4 py-2 rounded-lg hover:bg-pink-600">
-                Guardar Cambios
-              </button>
-            </div>
           </div>
         )}
+        <div className="flex justify-end mt-4">
+          <button onClick={handleCloseHistory} className="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 mr-2">
+            Cerrar
+          </button>
+          <button onClick={handleSaveHistory} className="bg-pink-500 text-white px-4 py-2 rounded-lg hover:bg-pink-600 mr-2">
+            Guardar Cambios
+          </button>
+          <button
+            onClick={handlePrint}
+            className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 flex items-center space-x-2 transition-colors"
+          >
+            <AiOutlinePrinter className="h-5 w-5" />
+            <span>Imprimir / PDF</span>
+          </button>
+        </div>
       </Modal>
 
       {/* Modal para el Historial de Turnos y Tratamientos */}
@@ -471,7 +555,7 @@ const Pacientes = ({
         isOpen={isDeleteConfirmationModalOpen}
         onClose={handleCancelDelete}
       >
-        <p>¿Estás seguro de que deseas eliminar a este paciente? Esta acción no se puede deshacer.</p>
+        <p>¿Estás seguro de que deseas eliminar a **{patientToDelete?.name}**? Esta acción no se puede deshacer.</p>
         <div className="mt-6 flex justify-end space-x-4">
           <button
             onClick={handleCancelDelete}
