@@ -34,7 +34,7 @@ const Agenda = ({ patients, appointments, addAppointment, deleteAppointment, upd
   const [isFinishing, setIsFinishing] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
-  const [isReassigning, setIsReassigning] = useState(false); // Nuevo estado para reasignar turno
+  const [isReassigning, setIsReassigning] = useState(false);
 
   // Nuevo estado para la confirmación de eliminación en el modal diario
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -273,9 +273,9 @@ const Agenda = ({ patients, appointments, addAppointment, deleteAppointment, upd
         </button>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
         <table className="min-w-full divide-y divide-gray-200 table-fixed">
-          <thead className="bg-pink-50">
+          <thead className="bg-pink-50 sticky top-0 z-10">
             <tr>
               <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hora</th>
               {getWeekDays().map((day, index) => (
@@ -519,7 +519,7 @@ const Agenda = ({ patients, appointments, addAppointment, deleteAppointment, upd
       {/* Modal para ver turnos del día */}
       <Modal title={`Turnos del ${new Date(currentWeekStart.getTime() + (weekDays.indexOf(weekDays[0]) * 24 * 60 * 60 * 1000)).toLocaleDateString()}`} isOpen={dailyModalOpen} onClose={closeModal}>
         {dailyAppointments.length > 0 ? (
-          <ul>
+          <ul className="max-h-[60vh] overflow-y-auto">
             {dailyAppointments.map((a, i) => (
               <li key={i} className="bg-gray-100 p-3 mb-2 rounded flex justify-between items-center">
                 <div>

@@ -207,7 +207,7 @@ const Pacientes = ({
 
       <div>
         <h3 className="text-2xl font-bold text-gray-800 mb-4">Lista de Pacientes</h3>
-        <ul className="space-y-4">
+        <ul className="space-y-4 max-h-[70vh] overflow-y-auto">
           {filteredPatients.length > 0 ? (
             filteredPatients.map((patient, index) => (
               <li

@@ -95,7 +95,7 @@ function Consultorios({ consultorios, newConsultorio, setNewConsultorio, addOrUp
         </div>
       </Modal>
 
-      <ul className="mt-6 space-y-3">
+      <ul className="mt-6 space-y-3 max-h-[70vh] overflow-y-auto">
         {consultorios.map((c, i) => (
           <li key={i} className="bg-gray-50 p-4 rounded-xl shadow-md border border-gray-200 flex justify-between items-center">
             <div>
