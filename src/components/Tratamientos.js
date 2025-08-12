@@ -1,42 +1,32 @@
-import React, { useState } from 'react';
+import React from 'react';
 import Modal from './Modal';
+import useCRUDModal from '../hooks/useCRUDModal'; // Importar el hook
 
 function Tratamientos({ treatments, newTreatment, setNewTreatment, addOrUpdateTreatment, editingTreatmentIndex, editTreatment, deleteTreatment }) {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [treatmentToDelete, setTreatmentToDelete] = useState(null); // Nuevo estado para la confirmación
+  const { isModalOpen, itemToDelete, openModal, closeModal, confirmDelete, cancelDelete } = useCRUDModal();
 
   const openAddModal = () => {
     setNewTreatment({ name: "", description: "", price: "", duration: "" });
-    setIsModalOpen(true);
+    openModal();
   };
 
   const openEditModal = (index) => {
     editTreatment(index);
-    setIsModalOpen(true);
-  };
-
-  const closeModal = () => {
-    setIsModalOpen(false);
-    setNewTreatment({ name: "", description: "", price: "", duration: "" });
+    openModal();
   };
   
-  // Funciones para la confirmación de eliminación
-  const confirmDelete = (index) => {
-    setTreatmentToDelete(index);
-  };
-
   const handleConfirmDelete = () => {
-    if (treatmentToDelete !== null) {
-      deleteTreatment(treatmentToDelete);
-      setTreatmentToDelete(null);
+    if (itemToDelete !== null) {
+      deleteTreatment(itemToDelete);
+      cancelDelete();
     }
   };
 
-  const handleCancelDelete = () => {
-    setTreatmentToDelete(null);
-  };
-
   const handleSaveTreatment = () => {
+    if (newTreatment.name.trim() === "") {
+        alert("El nombre del tratamiento es obligatorio.");
+        return;
+    }
     addOrUpdateTreatment();
     closeModal();
   };
@@ -137,12 +127,12 @@ function Tratamientos({ treatments, newTreatment, setNewTreatment, addOrUpdateTr
       </ul>
       
       {/* Modal de confirmación de eliminación */}
-      <Modal title="Confirmar Eliminación" isOpen={treatmentToDelete !== null} onClose={handleCancelDelete}>
+      <Modal title="Confirmar Eliminación" isOpen={itemToDelete !== null} onClose={cancelDelete}>
         <p>¿Estás seguro de que quieres eliminar este tratamiento? Esta acción no se puede deshacer.</p>
         <div className="flex justify-end mt-4">
           <button
             className="bg-gray-300 text-gray-700 px-6 py-2 rounded hover:bg-gray-400 transition mr-2"
-            onClick={handleCancelDelete}
+            onClick={cancelDelete}
           >
             Cancelar
           </button>

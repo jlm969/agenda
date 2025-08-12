@@ -44,9 +44,9 @@ const Agenda = ({ patients, appointments, addAppointment, deleteAppointment, upd
   const weekDays = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
   const findAppointmentIndex = (appointment) => {
-    return appointments.findIndex(app => 
-      app.date === appointment.date && 
-      app.time === appointment.time && 
+    return appointments.findIndex(app =>
+      app.date === appointment.date &&
+      app.time === appointment.time &&
       app.patientName === appointment.patientName &&
       app.consultorio === appointment.consultorio
     );
@@ -59,17 +59,17 @@ const Agenda = ({ patients, appointments, addAppointment, deleteAppointment, upd
     if (existingAppointment) {
       setSelectedAppointmentDetails(existingAppointment);
       setEditingAppointmentIndex(findAppointmentIndex(existingAppointment));
-      setNewAppointment({ ...existingAppointment }); 
+      setNewAppointment({ ...existingAppointment });
     } else {
-      setNewAppointment({ 
-        date: formattedDate, 
-        time: time, 
-        patientName: "", 
-        consultorio: "", 
-        treatment: "", 
-        status: "confirmed", 
-        notes: "", 
-        photos: [] 
+      setNewAppointment({
+        date: formattedDate,
+        time: time,
+        patientName: "",
+        consultorio: "",
+        treatment: "",
+        status: "confirmed",
+        notes: "",
+        photos: []
       });
       setSelectedAppointmentDetails(null);
       setEditingAppointmentIndex(null);
@@ -176,8 +176,8 @@ const Agenda = ({ patients, appointments, addAppointment, deleteAppointment, upd
   
   const isAppointmentBooked = (day, time) => {
     const formattedDate = day.toISOString().split('T')[0];
-    return appointments.find(a => 
-      a.date === formattedDate && 
+    return appointments.find(a =>
+      a.date === formattedDate &&
       a.time === time
     );
   };
@@ -190,7 +190,7 @@ const Agenda = ({ patients, appointments, addAppointment, deleteAppointment, upd
             date: selectedAppointmentDetails.date,
             time: selectedAppointmentDetails.time,
             consultorio: selectedAppointmentDetails.consultorio,
-            patientName: "", 
+            patientName: "",
             treatment: "",
             status: "confirmed",
             notes: "",
@@ -207,7 +207,7 @@ const Agenda = ({ patients, appointments, addAppointment, deleteAppointment, upd
         const reAssignedAppointment = {
             ...newAppointment,
             status: 'confirmed',
-            cancelReason: '', 
+            cancelReason: '',
             notes: '',
             photos: []
         };
@@ -218,7 +218,6 @@ const Agenda = ({ patients, appointments, addAppointment, deleteAppointment, upd
     }
   };
 
-
   // Funciones para la confirmación de eliminación de turno
   const confirmDeleteAppointment = (appointment) => {
     setAppointmentToDelete(appointment);
@@ -227,9 +226,9 @@ const Agenda = ({ patients, appointments, addAppointment, deleteAppointment, upd
 
   const handleConfirmDeleteAppointment = () => {
     if (appointmentToDelete) {
-      const originalIndex = appointments.findIndex(app => 
-        app.date === appointmentToDelete.date && 
-        app.time === appointmentToDelete.time && 
+      const originalIndex = appointments.findIndex(app =>
+        app.date === appointmentToDelete.date &&
+        app.time === appointmentToDelete.time &&
         app.patientName === appointmentToDelete.patientName
       );
       if (originalIndex !== -1) {
@@ -275,16 +274,18 @@ const Agenda = ({ patients, appointments, addAppointment, deleteAppointment, upd
       </div>
 
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
+        <table className="min-w-full divide-y divide-gray-200 table-fixed">
           <thead className="bg-pink-50">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Hora</th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hora</th>
               {getWeekDays().map((day, index) => (
-                <th key={index} 
-                    onClick={() => handleDayHeaderClick(day)}
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-pink-100 transition-colors">
+                <th 
+                  key={index}
+                  onClick={() => handleDayHeaderClick(day)}
+                  className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-pink-100 transition-colors"
+                >
                   {weekDays[index]} <br/>
-                  <span className="text-base text-pink-800 font-semibold">{day.getDate()}</span>
+                  <span className="text-sm font-semibold">{day.getDate()}</span>
                 </th>
               ))}
             </tr>
@@ -292,7 +293,7 @@ const Agenda = ({ patients, appointments, addAppointment, deleteAppointment, upd
           <tbody className="bg-white divide-y divide-gray-200">
             {timeSlots.map((time, timeIndex) => (
               <tr key={timeIndex}>
-                <td className="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900 w-24">{time}</td>
+                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{time}</td>
                 {getWeekDays().map((day, dayIndex) => {
                   const appointment = isAppointmentBooked(day, time);
                   let cellClass = "bg-gray-100 text-gray-700 cursor-pointer hover:bg-gray-200";
@@ -307,7 +308,7 @@ const Agenda = ({ patients, appointments, addAppointment, deleteAppointment, upd
                   }
 
                   return (
-                    <td key={dayIndex} className={`px-4 py-3 text-xs text-center border ${cellClass}`}
+                    <td key={dayIndex} className={`px-2 py-2 text-xs text-center border ${cellClass}`}
                         onClick={() => handleSlotClick(day, time)}>
                         {appointment ? (
                             <div>
@@ -316,7 +317,7 @@ const Agenda = ({ patients, appointments, addAppointment, deleteAppointment, upd
                                 <p>{appointment.consultorio}</p>
                             </div>
                         ) : (
-                            'Disponible'
+                            <span className="text-gray-500">Disponible</span>
                         )}
                     </td>
                   );
@@ -328,9 +329,9 @@ const Agenda = ({ patients, appointments, addAppointment, deleteAppointment, upd
       </div>
 
       {/* Modal principal para agendar, ver, editar, cancelar o finalizar turno */}
-      <Modal 
-        title={isAdding ? "Agendar Nuevo Turno" : (isFinishing ? "Finalizar Tratamiento" : (isCancelling ? "Cancelar Turno" : (isReassigning ? "Reasignar Turno Cancelado" : "Detalles del Turno")))} 
-        isOpen={appointmentModalOpen} 
+      <Modal
+        title={isAdding ? "Agendar Nuevo Turno" : (isFinishing ? "Finalizar Tratamiento" : (isCancelling ? "Cancelar Turno" : (isReassigning ? "Reasignar Turno Cancelado" : "Detalles del Turno")))}
+        isOpen={appointmentModalOpen}
         onClose={closeModal}
       >
         {isViewing ? (
@@ -407,9 +408,9 @@ const Agenda = ({ patients, appointments, addAppointment, deleteAppointment, upd
                     const file = e.target.files[0];
                     const reader = new FileReader();
                     reader.onloadend = () => {
-                      setNewAppointment(prev => ({ 
-                        ...prev, 
-                        photos: prev.photos ? [...prev.photos, reader.result] : [reader.result] 
+                      setNewAppointment(prev => ({
+                        ...prev,
+                        photos: prev.photos ? [...prev.photos, reader.result] : [reader.result]
                       }));
                     };
                     if (file) {

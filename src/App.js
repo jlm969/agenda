@@ -4,6 +4,7 @@ import Pacientes from "./components/Pacientes";
 import Agenda from "./components/Agenda";
 import Tratamientos from "./components/Tratamientos";
 import Consultorios from "./components/Consultorios";
+import { v4 as uuidv4 } from 'uuid'; // Importamos la librería para generar IDs únicos
 
 function App() {
   // Estados y lógica para Pacientes
@@ -88,8 +89,9 @@ function App() {
         updatedPatients[editingPatientIndex] = newPatient;
         setPatients(updatedPatients);
       } else {
-        // Agregamos el campo de historia clínica al crear un nuevo paciente
-        setPatients([...patients, { ...newPatient, historiaClinica: "", history: [] }]);
+        // CORRECCIÓN: Genera un ID único al crear un nuevo paciente
+        const patientWithId = { ...newPatient, id: uuidv4(), historiaClinica: "", history: [] };
+        setPatients([...patients, patientWithId]);
       }
       setNewPatient({ name: "", phone: "", email: "", photo: "" });
       setEditingPatientIndex(null);
@@ -252,7 +254,7 @@ function App() {
             deletePatient={deletePatient}
             handlePhotoUpload={handlePhotoUpload}
             appointments={appointments}
-            updatePatient={updatePatient} // Nueva prop
+            updatePatient={updatePatient}
           />
         )}
         {activeTab === "treatments" && (

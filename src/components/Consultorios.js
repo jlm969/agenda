@@ -1,41 +1,32 @@
-import React, { useState } from 'react';
+import React from 'react';
 import Modal from './Modal';
+import useCRUDModal from '../hooks/useCRUDModal';
 
 function Consultorios({ consultorios, newConsultorio, setNewConsultorio, addOrUpdateConsultorio, editingConsultorioIndex, editConsultorio, deleteConsultorio }) {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [consultorioToDelete, setConsultorioToDelete] = useState(null);
+  const { isModalOpen, itemToDelete, openModal, closeModal, confirmDelete, cancelDelete } = useCRUDModal();
 
   const openAddModal = () => {
     setNewConsultorio({ name: "", address: "", city: "", phone: "" });
-    setIsModalOpen(true);
+    openModal();
   };
 
   const openEditModal = (index) => {
     editConsultorio(index);
-    setIsModalOpen(true);
-  };
-
-  const closeModal = () => {
-    setIsModalOpen(false);
-    setNewConsultorio({ name: "", address: "", city: "", phone: "" });
-  };
-
-  const confirmDelete = (index) => {
-    setConsultorioToDelete(index);
+    openModal();
   };
 
   const handleConfirmDelete = () => {
-    if (consultorioToDelete !== null) {
-      deleteConsultorio(consultorioToDelete);
-      setConsultorioToDelete(null);
+    if (itemToDelete !== null) {
+      deleteConsultorio(itemToDelete);
+      cancelDelete();
     }
   };
 
-  const handleCancelDelete = () => {
-    setConsultorioToDelete(null);
-  };
-
   const handleSaveConsultorio = () => {
+    if (newConsultorio.name.trim() === "") {
+        alert("El nombre del consultorio es obligatorio.");
+        return;
+    }
     addOrUpdateConsultorio();
     closeModal();
   };
@@ -139,12 +130,12 @@ function Consultorios({ consultorios, newConsultorio, setNewConsultorio, addOrUp
         ))}
       </ul>
 
-      <Modal title="Confirmar Eliminación" isOpen={consultorioToDelete !== null} onClose={handleCancelDelete}>
+      <Modal title="Confirmar Eliminación" isOpen={itemToDelete !== null} onClose={cancelDelete}>
         <p>¿Estás seguro de que quieres eliminar este consultorio? Esta acción no se puede deshacer.</p>
         <div className="flex justify-end mt-4">
           <button
             className="bg-gray-300 text-gray-700 px-6 py-2 rounded hover:bg-gray-400 transition mr-2"
-            onClick={handleCancelDelete}
+            onClick={cancelDelete}
           >
             Cancelar
           </button>

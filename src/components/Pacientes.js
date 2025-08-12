@@ -1,5 +1,7 @@
 import React, { useState, useRef } from "react";
 import Modal from "./Modal";
+import useCRUDModal from "../hooks/useCRUDModal";
+import PatientHistoryModal from "./PatientHistoryModal";
 import { useReactToPrint } from "react-to-print";
 import { AiOutlinePrinter } from "react-icons/ai";
 
@@ -54,14 +56,19 @@ const Pacientes = ({
   appointments,
   updatePatient,
 }) => {
-  const [isPatientModalOpen, setIsPatientModalOpen] = useState(false);
-  const [historyModalOpen, setHistoryModalOpen] = useState(false);
-  const [selectedPatient, setSelectedPatient] = useState(null);
-  const [treatmentHistoryModalOpen, setTreatmentHistoryModalOpen] = useState(false);
-  const [selectedPatientAppointments, setSelectedPatientAppointments] = useState([]);
-  const [isDeleteConfirmationModalOpen, setIsDeleteConfirmationModalOpen] = useState(false);
-  const [patientToDelete, setPatientToDelete] = useState(null);
+  const {
+    isModalOpen,
+    itemToDelete,
+    openModal,
+    closeModal,
+    confirmDelete,
+    cancelDelete
+  } = useCRUDModal();
 
+  const [treatmentHistoryModalOpen, setTreatmentHistoryModalOpen] = useState(false);
+  const [selectedPatient, setSelectedPatient] = useState(null);
+
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [historialClinico, setHistorialClinico] = useState({
     edad: "",
     antecedentesPersonales: "",
@@ -77,83 +84,41 @@ const Pacientes = ({
     content: () => componentRef.current,
     documentTitle: `Historial Clínico de ${selectedPatient?.name}`,
     pageStyle: `
-      @page {
-        size: A4;
-        margin: 20mm;
-      }
-      body {
-        font-family: Arial, sans-serif;
-        font-size: 12px;
-        color: #333;
-      }
-      h1 {
-        text-align: center;
-        margin-bottom: 20px;
-        color: #1a202c;
-      }
-      .print-section {
-        border-bottom: 1px solid #e2e8f0;
-        padding-bottom: 10px;
-        margin-bottom: 10px;
-      }
-      .field-label {
-        font-weight: 600;
-        color: #4a5568;
-      }
-      .field-value {
-        margin-left: 8px;
-        font-style: italic;
-      }
+      @page { size: A4; margin: 20mm; }
+      body { font-family: Arial, sans-serif; font-size: 12px; color: #333; }
+      h1 { text-align: center; margin-bottom: 20px; color: #1a202c; }
+      .print-section { border-bottom: 1px solid #e2e8f0; padding-bottom: 10px; margin-bottom: 10px; }
+      .field-label { font-weight: 600; color: #4a5568; }
+      .field-value { margin-left: 8px; font-style: italic; }
     `,
   });
 
-  const statusTranslations = {
-    pending: "Pendiente",
-    confirmed: "Confirmado",
-    canceled: "Cancelado",
-    completed: "Finalizado",
-  };
-
-  const handleOpenPatientModal = (index = null) => {
-    if (index !== null) {
-      editPatient(index);
-    } else {
-      setNewPatient({ name: "", phone: "", email: "", photo: "" });
-      setEditingPatientIndex(null);
-    }
-    setIsPatientModalOpen(true);
-  };
-
-  const handleClosePatientModal = () => {
-    setIsPatientModalOpen(false);
+  const openAddPatientModal = () => {
     setNewPatient({ name: "", phone: "", email: "", photo: "" });
     setEditingPatientIndex(null);
+    openModal();
+  };
+
+  const openEditPatientModal = (index) => {
+    editPatient(index);
+    openModal();
   };
 
   const handleSavePatient = () => {
     addOrUpdatePatient();
-    handleClosePatientModal();
+    closeModal();
   };
 
-  const handleDeletePatientClick = (patient) => {
-    setPatientToDelete(patient);
-    setIsDeleteConfirmationModalOpen(true);
+  const handleViewTreatmentHistory = (patient) => {
+    setSelectedPatient(patient);
+    setTreatmentHistoryModalOpen(true);
   };
 
-  const handleConfirmDeletePatient = () => {
-    const patientIndex = patients.findIndex(p => p.email === patientToDelete.email);
-    if (patientIndex !== -1) {
-      deletePatient(patientIndex);
-    }
-    setIsDeleteConfirmationModalOpen(false);
-    setPatientToDelete(null);
-  };
+  const handleCloseTreatmentHistory = () => {
+    setTreatmentHistoryModalOpen(false);
+    setSelectedPatient(null);
+  }
 
-  const handleCancelDelete = () => {
-    setIsDeleteConfirmationModalOpen(false);
-    setPatientToDelete(null);
-  };
-  
   const handleOpenHistory = (patient) => {
     setSelectedPatient(patient);
     setHistorialClinico(patient.historialClinico || {
@@ -192,19 +157,17 @@ const Pacientes = ({
     if (selectedPatient) {
       const patientIndex = patients.findIndex(p => p.email === selectedPatient.email);
       if (patientIndex !== -1) {
-        updatePatient(patientIndex, { historialClinico: historialClinico });
+        updatePatient(patientIndex, { ...selectedPatient, historialClinico: historialClinico });
       }
       handleCloseHistory();
     }
   };
 
-  const handleViewTreatmentHistory = (patient) => {
-    const patientAppointments = appointments.filter(
-      (app) => app.patientName === patient.name
-    );
-    setSelectedPatient(patient);
-    setSelectedPatientAppointments(patientAppointments);
-    setTreatmentHistoryModalOpen(true);
+  const handleConfirmDeletePatient = () => {
+    if (itemToDelete !== null) {
+      deletePatient(itemToDelete);
+      cancelDelete();
+    }
   };
 
   const filteredPatients = patients.filter((patient) =>
@@ -216,7 +179,7 @@ const Pacientes = ({
       <h2 className="text-2xl font-semibold text-pink-600 mb-4">Gestión de Pacientes</h2>
       <div className="flex justify-between mb-6 items-center">
         <button
-          onClick={() => handleOpenPatientModal()}
+          onClick={openAddPatientModal}
           className="bg-pink-500 text-white px-6 py-2 rounded hover:bg-pink-600 transition mb-4 flex items-center space-x-2"
         >
           <svg
@@ -307,7 +270,7 @@ const Pacientes = ({
                     <span>Historia Clínica</span>
                   </button>
                   <button
-                    onClick={() => handleOpenPatientModal(index)}
+                    onClick={() => openEditPatientModal(index)}
                     className="bg-yellow-400 text-white px-4 py-2 rounded text-sm hover:bg-yellow-500 transition-colors flex items-center space-x-1"
                   >
                     <svg
@@ -321,7 +284,7 @@ const Pacientes = ({
                     <span>Editar</span>
                   </button>
                   <button
-                    onClick={() => handleDeletePatientClick(patient)}
+                    onClick={() => confirmDelete(index)}
                     className="bg-red-500 text-white px-4 py-2 rounded text-sm hover:bg-red-600 transition-colors flex items-center space-x-1"
                   >
                     <svg
@@ -347,7 +310,7 @@ const Pacientes = ({
         </ul>
       </div>
 
-      {/* Componente oculto para la impresión, fuera del Modal */}
+      {/* Componente oculto para la impresión */}
       <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
         {selectedPatient && <PrintableHistorial ref={componentRef} patient={selectedPatient} historial={historialClinico} />}
       </div>
@@ -355,8 +318,8 @@ const Pacientes = ({
       {/* Modal para Agregar/Editar Paciente */}
       <Modal
         title={editingPatientIndex !== null ? "Editar Paciente" : "Agregar Nuevo Paciente"}
-        isOpen={isPatientModalOpen}
-        onClose={handleClosePatientModal}
+        isOpen={isModalOpen}
+        onClose={closeModal}
       >
         <div className="space-y-4">
           <div>
@@ -403,7 +366,7 @@ const Pacientes = ({
         </div>
         <div className="mt-6 flex justify-end space-x-4">
           <button
-            onClick={handleClosePatientModal}
+            onClick={closeModal}
             className="bg-gray-300 text-gray-800 px-6 py-2 rounded hover:bg-gray-400 transition"
           >
             Cancelar
@@ -417,70 +380,76 @@ const Pacientes = ({
         </div>
       </Modal>
 
-      {/* Modal para el Historial Clínico (Ahora solo con los campos de edición) */}
+      {/* Modal para la Historia Clínica */}
       <Modal
         title={`Historia Clínica de ${selectedPatient?.name}`}
         isOpen={historyModalOpen}
         onClose={handleCloseHistory}
+        size="md" // Nuevo prop para un modal más pequeño
       >
         {selectedPatient && (
-          <div className="space-y-4">
-            <h4 className="text-xl font-bold mb-4">Editar Historial</h4>
-            <div className="flex items-center space-x-2">
-              <label htmlFor="edad" className="font-semibold text-gray-700">Edad:</label>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Campo de Edad */}
+            <div className="flex flex-col">
+              <label htmlFor="edad" className="text-gray-700 text-sm font-semibold mb-1">Edad:</label>
               <input
                 type="text"
                 id="edad"
-                className="border p-2 rounded flex-grow"
+                className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-400 transition-all"
                 value={historialClinico.edad}
                 onChange={handleHistorialChange}
               />
             </div>
-            <div className="flex items-center space-x-2 mt-2">
-              <label htmlFor="antecedentesPersonales" className="font-semibold text-gray-700 whitespace-nowrap">Antecedentes Personales:</label>
+            {/* Campo de Antecedentes Personales */}
+            <div className="flex flex-col">
+              <label htmlFor="antecedentesPersonales" className="text-gray-700 text-sm font-semibold mb-1">Antecedentes Personales:</label>
               <input
                 type="text"
                 id="antecedentesPersonales"
-                className="border p-2 rounded flex-grow"
+                className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-400 transition-all"
                 value={historialClinico.antecedentesPersonales}
                 onChange={handleHistorialChange}
               />
             </div>
-            <div className="flex items-center space-x-2 mt-2">
-              <label htmlFor="antecedentesFamiliares" className="font-semibold text-gray-700 whitespace-nowrap">Antecedentes Familiares:</label>
+            {/* Campo de Antecedentes Familiares */}
+            <div className="flex flex-col">
+              <label htmlFor="antecedentesFamiliares" className="text-gray-700 text-sm font-semibold mb-1">Antecedentes Familiares:</label>
               <input
                 type="text"
                 id="antecedentesFamiliares"
-                className="border p-2 rounded flex-grow"
+                className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-400 transition-all"
                 value={historialClinico.antecedentesFamiliares}
                 onChange={handleHistorialChange}
               />
             </div>
-            <div className="flex items-center space-x-2 mt-2">
-              <label htmlFor="medicacionHabitual" className="font-semibold text-gray-700 whitespace-nowrap">Medicación Habitual:</label>
+            {/* Campo de Medicación Habitual */}
+            <div className="flex flex-col">
+              <label htmlFor="medicacionHabitual" className="text-gray-700 text-sm font-semibold mb-1">Medicación Habitual:</label>
               <input
                 type="text"
                 id="medicacionHabitual"
-                className="border p-2 rounded flex-grow"
+                className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-400 transition-all"
                 value={historialClinico.medicacionHabitual}
                 onChange={handleHistorialChange}
               />
             </div>
-            <div className="flex items-center space-x-2 mt-2">
-              <label htmlFor="alergias" className="font-semibold text-gray-700 whitespace-nowrap">Alergias:</label>
+            {/* Campo de Alergias */}
+            <div className="flex flex-col">
+              <label htmlFor="alergias" className="text-gray-700 text-sm font-semibold mb-1">Alergias:</label>
               <input
                 type="text"
                 id="alergias"
-                className="border p-2 rounded flex-grow"
+                className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-400 transition-all"
                 value={historialClinico.alergias}
                 onChange={handleHistorialChange}
               />
             </div>
-            <div className="flex items-start space-x-2 mt-2">
-              <label htmlFor="observaciones" className="font-semibold text-gray-700 whitespace-nowrap pt-2">Observaciones:</label>
+            {/* Campo de Observaciones (ocupa 2 columnas) */}
+            <div className="flex flex-col col-span-1 md:col-span-2">
+              <label htmlFor="observaciones" className="text-gray-700 text-sm font-semibold mb-1">Observaciones:</label>
               <textarea
                 id="observaciones"
-                className="border p-2 rounded flex-grow min-h-[40px]"
+                className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-400 transition-all min-h-[80px]"
                 value={historialClinico.observaciones}
                 onChange={handleHistorialChange}
               />
@@ -505,60 +474,23 @@ const Pacientes = ({
       </Modal>
 
       {/* Modal para el Historial de Turnos y Tratamientos */}
-      <Modal
-        title={`Historial de Turnos de ${selectedPatient?.name}`}
+      <PatientHistoryModal
         isOpen={treatmentHistoryModalOpen}
-        onClose={() => setTreatmentHistoryModalOpen(false)}
-      >
-        {selectedPatientAppointments.length > 0 ? (
-          <div className="space-y-4">
-            {selectedPatientAppointments.map((app, index) => (
-              <div key={index} className="p-4 border rounded-lg shadow-sm bg-gray-50">
-                <p><strong>Fecha:</strong> {app.date}</p>
-                <p><strong>Hora:</strong> {app.time}</p>
-                <p><strong>Consultorio:</strong> {app.consultorio}</p>
-                <p><strong>Tratamiento:</strong> {app.treatment}</p>
-                <p>
-                  <strong>Estado:</strong> {statusTranslations[app.status] || app.status}
-                </p>
-                {app.notes && <p><strong>Notas:</strong> {app.notes}</p>}
-                {app.cancelReason && <p className="text-red-600"><strong>Motivo de Cancelación:</strong> {app.cancelReason}</p>}
-                {app.photos && app.photos.length > 0 && (
-                  <div className="mt-2">
-                    <strong>Fotos:</strong>
-                    <div className="flex flex-wrap gap-2 mt-1">
-                      {app.photos.map((photo, photoIndex) => (
-                        <img key={photoIndex} src={photo} alt={`Tratamiento ${index}`} className="w-16 h-16 object-cover rounded" />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-center text-gray-500">No hay turnos registrados para este paciente.</p>
-        )}
-        <div className="flex justify-end mt-4">
-          <button
-            onClick={() => setTreatmentHistoryModalOpen(false)}
-            className="bg-pink-500 text-white px-4 py-2 rounded-lg hover:bg-pink-600"
-          >
-            Cerrar
-          </button>
-        </div>
-      </Modal>
+        onClose={handleCloseTreatmentHistory}
+        patient={selectedPatient}
+        appointments={appointments}
+      />
 
       {/* Modal de confirmación de eliminación */}
       <Modal
         title="Confirmar Eliminación"
-        isOpen={isDeleteConfirmationModalOpen}
-        onClose={handleCancelDelete}
+        isOpen={itemToDelete !== null}
+        onClose={cancelDelete}
       >
-        <p>¿Estás seguro de que deseas eliminar a **{patientToDelete?.name}**? Esta acción no se puede deshacer.</p>
+        <p>¿Estás seguro de que deseas eliminar a este paciente? Esta acción no se puede deshacer.</p>
         <div className="mt-6 flex justify-end space-x-4">
           <button
-            onClick={handleCancelDelete}
+            onClick={cancelDelete}
             className="bg-gray-300 text-gray-800 px-6 py-2 rounded hover:bg-gray-400 transition"
           >
             Cancelar
