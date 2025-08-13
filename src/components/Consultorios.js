@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Modal from './Modal';
 import useCRUDModal from '../hooks/useCRUDModal';
-import { collection, addDoc, getDocs, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 
 function Consultorios() {
@@ -12,15 +12,15 @@ function Consultorios() {
 
   const consultoriosRef = collection(db, "consultorios");
 
-  // Cargar consultorios desde Firestore al iniciar
+  // Cargar consultorios en tiempo real
   useEffect(() => {
-    const fetchConsultorios = async () => {
-      const snapshot = await getDocs(consultoriosRef);
+    const unsubscribe = onSnapshot(consultoriosRef, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setConsultorios(data);
-    };
-    fetchConsultorios();
-  }, [consultoriosRef]); // <-- warning corregido, ahora React sabe que depende de consultoriosRef
+    });
+
+    return () => unsubscribe(); // Cleanup al desmontar el componente
+  }, [consultoriosRef]);
 
   const openAddModal = () => {
     setNewConsultorio({ name: "", address: "", city: "", phone: "" });
@@ -39,12 +39,8 @@ function Consultorios() {
       const consultorio = consultorios[editingConsultorioIndex];
       const docRef = doc(db, "consultorios", consultorio.id);
       await updateDoc(docRef, newConsultorio);
-      const updatedConsultorios = [...consultorios];
-      updatedConsultorios[editingConsultorioIndex] = { ...newConsultorio, id: consultorio.id };
-      setConsultorios(updatedConsultorios);
     } else {
-      const docRef = await addDoc(consultoriosRef, newConsultorio);
-      setConsultorios([...consultorios, { ...newConsultorio, id: docRef.id }]);
+      await addDoc(consultoriosRef, newConsultorio);
     }
     closeModal();
   };
@@ -54,7 +50,6 @@ function Consultorios() {
       const consultorio = consultorios[itemToDelete];
       const docRef = doc(db, "consultorios", consultorio.id);
       await deleteDoc(docRef);
-      setConsultorios(consultorios.filter((_, i) => i !== itemToDelete));
       cancelDelete();
     }
   };
@@ -188,3 +183,4 @@ function Consultorios() {
 }
 
 export default Consultorios;
+

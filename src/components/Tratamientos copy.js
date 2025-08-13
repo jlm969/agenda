@@ -1,68 +1,34 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import Modal from './Modal';
-import useCRUDModal from '../hooks/useCRUDModal';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebase';
+import useCRUDModal from '../hooks/useCRUDModal'; // Importar el hook
 
-function Tratamientos() {
-  const [treatments, setTreatments] = useState([]);
-  const [newTreatment, setNewTreatment] = useState({ name: "", description: "", price: "", duration: "" });
-  const [editingTreatmentIndex, setEditingTreatmentIndex] = useState(null);
+function Tratamientos({ treatments, newTreatment, setNewTreatment, addOrUpdateTreatment, editingTreatmentIndex, editTreatment, deleteTreatment }) {
   const { isModalOpen, itemToDelete, openModal, closeModal, confirmDelete, cancelDelete } = useCRUDModal();
-
-  // Cargar tratamientos en tiempo real
-  useEffect(() => {
-    const tratamientosRef = collection(db, "tratamientos");
-
-    const unsubscribe = onSnapshot(tratamientosRef, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setTreatments(data);
-    });
-
-    // Cleanup al desmontar el componente
-    return () => unsubscribe();
-  }, []); // Ya no hay warning
 
   const openAddModal = () => {
     setNewTreatment({ name: "", description: "", price: "", duration: "" });
-    setEditingTreatmentIndex(null);
     openModal();
   };
 
   const openEditModal = (index) => {
-    setEditingTreatmentIndex(index);
-    setNewTreatment(treatments[index]);
+    editTreatment(index);
     openModal();
   };
-
-  const addOrUpdateTreatment = async () => {
-    const tratamientosRef = collection(db, "tratamientos");
-
-    if (editingTreatmentIndex !== null) {
-      const treatment = treatments[editingTreatmentIndex];
-      const docRef = doc(db, "tratamientos", treatment.id);
-      await updateDoc(docRef, newTreatment);
-    } else {
-      await addDoc(tratamientosRef, newTreatment);
-    }
-    closeModal();
-  };
-
-  const handleConfirmDelete = async () => {
+  
+  const handleConfirmDelete = () => {
     if (itemToDelete !== null) {
-      const treatment = treatments[itemToDelete];
-      const docRef = doc(db, "tratamientos", treatment.id);
-      await deleteDoc(docRef);
+      deleteTreatment(itemToDelete);
       cancelDelete();
     }
   };
 
   const handleSaveTreatment = () => {
     if (newTreatment.name.trim() === "") {
-      alert("El nombre del tratamiento es obligatorio.");
-      return;
+        alert("El nombre del tratamiento es obligatorio.");
+        return;
     }
     addOrUpdateTreatment();
+    closeModal();
   };
 
   return (
@@ -159,7 +125,8 @@ function Tratamientos() {
           </li>
         ))}
       </ul>
-
+      
+      {/* Modal de confirmación de eliminación */}
       <Modal title="Confirmar Eliminación" isOpen={itemToDelete !== null} onClose={cancelDelete}>
         <p>¿Estás seguro de que quieres eliminar este tratamiento? Esta acción no se puede deshacer.</p>
         <div className="flex justify-end mt-4">
