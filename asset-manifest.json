@@ -1,16 +1,16 @@
 {
   "files": {
     "main.css": "/agenda/static/css/main.d509ee34.css",
-    "main.js": "/agenda/static/js/main.1d7831db.js",
+    "main.js": "/agenda/static/js/main.c6ce12c0.js",
     "static/js/453.761dcefd.chunk.js": "/agenda/static/js/453.761dcefd.chunk.js",
     "static/media/lh_estetica.png": "/agenda/static/media/lh_estetica.bc38adcc9f5dc993fbc1.png",
     "index.html": "/agenda/index.html",
     "main.d509ee34.css.map": "/agenda/static/css/main.d509ee34.css.map",
-    "main.1d7831db.js.map": "/agenda/static/js/main.1d7831db.js.map",
+    "main.c6ce12c0.js.map": "/agenda/static/js/main.c6ce12c0.js.map",
     "453.761dcefd.chunk.js.map": "/agenda/static/js/453.761dcefd.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.d509ee34.css",
-    "static/js/main.1d7831db.js"
+    "static/js/main.c6ce12c0.js"
   ]
 }
