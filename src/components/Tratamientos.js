@@ -10,10 +10,11 @@ function Tratamientos() {
   const [editingTreatmentIndex, setEditingTreatmentIndex] = useState(null);
   const { isModalOpen, itemToDelete, openModal, closeModal, confirmDelete, cancelDelete } = useCRUDModal();
 
+  // Declaramos la referencia fuera del useEffect
+  const tratamientosRef = collection(db, "tratamientos");
+
   // Cargar tratamientos en tiempo real
   useEffect(() => {
-    const tratamientosRef = collection(db, "tratamientos");
-
     const unsubscribe = onSnapshot(tratamientosRef, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setTreatments(data);
@@ -21,7 +22,7 @@ function Tratamientos() {
 
     // Cleanup al desmontar el componente
     return () => unsubscribe();
-  }, []); // Ya no hay warning
+  }, [tratamientosRef]); // Ahora está incluido como dependencia
 
   const openAddModal = () => {
     setNewTreatment({ name: "", description: "", price: "", duration: "" });
@@ -36,8 +37,6 @@ function Tratamientos() {
   };
 
   const addOrUpdateTreatment = async () => {
-    const tratamientosRef = collection(db, "tratamientos");
-
     if (editingTreatmentIndex !== null) {
       const treatment = treatments[editingTreatmentIndex];
       const docRef = doc(db, "tratamientos", treatment.id);
