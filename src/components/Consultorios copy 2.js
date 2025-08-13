@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import Modal from './Modal';
 import useCRUDModal from '../hooks/useCRUDModal';
 import { collection, addDoc, getDocs, updateDoc, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db } from '../firebase'; // tu archivo firebase.js
 
 function Consultorios() {
   const [consultorios, setConsultorios] = useState([]);
@@ -20,7 +20,7 @@ function Consultorios() {
       setConsultorios(data);
     };
     fetchConsultorios();
-  }, [consultoriosRef]); // <-- warning corregido, ahora React sabe que depende de consultoriosRef
+  }, []);
 
   const openAddModal = () => {
     setNewConsultorio({ name: "", address: "", city: "", phone: "" });
@@ -36,6 +36,7 @@ function Consultorios() {
 
   const addOrUpdateConsultorio = async () => {
     if (editingConsultorioIndex !== null) {
+      // Actualizar en Firestore
       const consultorio = consultorios[editingConsultorioIndex];
       const docRef = doc(db, "consultorios", consultorio.id);
       await updateDoc(docRef, newConsultorio);
@@ -43,6 +44,7 @@ function Consultorios() {
       updatedConsultorios[editingConsultorioIndex] = { ...newConsultorio, id: consultorio.id };
       setConsultorios(updatedConsultorios);
     } else {
+      // Agregar a Firestore
       const docRef = await addDoc(consultoriosRef, newConsultorio);
       setConsultorios([...consultorios, { ...newConsultorio, id: docRef.id }]);
     }

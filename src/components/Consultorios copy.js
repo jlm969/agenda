@@ -1,70 +1,34 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import Modal from './Modal';
 import useCRUDModal from '../hooks/useCRUDModal';
-import { collection, addDoc, getDocs, updateDoc, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '../firebase';
 
-function Consultorios() {
-  const [consultorios, setConsultorios] = useState([]);
-  const [newConsultorio, setNewConsultorio] = useState({ name: "", address: "", city: "", phone: "" });
-  const [editingConsultorioIndex, setEditingConsultorioIndex] = useState(null);
+function Consultorios({ consultorios, newConsultorio, setNewConsultorio, addOrUpdateConsultorio, editingConsultorioIndex, editConsultorio, deleteConsultorio }) {
   const { isModalOpen, itemToDelete, openModal, closeModal, confirmDelete, cancelDelete } = useCRUDModal();
-
-  const consultoriosRef = collection(db, "consultorios");
-
-  // Cargar consultorios desde Firestore al iniciar
-  useEffect(() => {
-    const fetchConsultorios = async () => {
-      const snapshot = await getDocs(consultoriosRef);
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setConsultorios(data);
-    };
-    fetchConsultorios();
-  }, [consultoriosRef]); // <-- warning corregido, ahora React sabe que depende de consultoriosRef
 
   const openAddModal = () => {
     setNewConsultorio({ name: "", address: "", city: "", phone: "" });
-    setEditingConsultorioIndex(null);
     openModal();
   };
 
   const openEditModal = (index) => {
-    setEditingConsultorioIndex(index);
-    setNewConsultorio(consultorios[index]);
+    editConsultorio(index);
     openModal();
   };
 
-  const addOrUpdateConsultorio = async () => {
-    if (editingConsultorioIndex !== null) {
-      const consultorio = consultorios[editingConsultorioIndex];
-      const docRef = doc(db, "consultorios", consultorio.id);
-      await updateDoc(docRef, newConsultorio);
-      const updatedConsultorios = [...consultorios];
-      updatedConsultorios[editingConsultorioIndex] = { ...newConsultorio, id: consultorio.id };
-      setConsultorios(updatedConsultorios);
-    } else {
-      const docRef = await addDoc(consultoriosRef, newConsultorio);
-      setConsultorios([...consultorios, { ...newConsultorio, id: docRef.id }]);
-    }
-    closeModal();
-  };
-
-  const handleConfirmDelete = async () => {
+  const handleConfirmDelete = () => {
     if (itemToDelete !== null) {
-      const consultorio = consultorios[itemToDelete];
-      const docRef = doc(db, "consultorios", consultorio.id);
-      await deleteDoc(docRef);
-      setConsultorios(consultorios.filter((_, i) => i !== itemToDelete));
+      deleteConsultorio(itemToDelete);
       cancelDelete();
     }
   };
 
   const handleSaveConsultorio = () => {
     if (newConsultorio.name.trim() === "") {
-      alert("El nombre del consultorio es obligatorio.");
-      return;
+        alert("El nombre del consultorio es obligatorio.");
+        return;
     }
     addOrUpdateConsultorio();
+    closeModal();
   };
 
   return (
