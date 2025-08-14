@@ -1,11 +1,9 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef } from "react";
 import Modal from "./Modal";
 import useCRUDModal from "../hooks/useCRUDModal";
 import PatientHistoryModal from "./PatientHistoryModal";
 import { useReactToPrint } from "react-to-print";
 import { AiOutlinePrinter } from "react-icons/ai";
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from "firebase/firestore";
-import { db } from "../firebase";
 
 // Componente para imprimir el historial clínico
 const PrintableHistorial = React.forwardRef(({ patient, historial }, ref) => {
@@ -43,14 +41,21 @@ const PrintableHistorial = React.forwardRef(({ patient, historial }, ref) => {
   );
 });
 
-const Pacientes = () => {
-  // ---- Estado (mismos nombres/uso que tu componente) ----
-  const [patients, setPatients] = useState([]);
-  const [newPatient, setNewPatient] = useState({ name: "", phone: "", email: "", photo: "" });
-  const [editingPatientIndex, setEditingPatientIndex] = useState(null);
-  const [filter, setFilter] = useState("");
-  const [appointments] = useState([]); // Se puede sincronizar luego cuando integremos Agenda
-
+const Pacientes = ({
+  patients,
+  newPatient,
+  setNewPatient,
+  addOrUpdatePatient,
+  editingPatientIndex,
+  setEditingPatientIndex,
+  filter,
+  setFilter,
+  editPatient,
+  deletePatient,
+  handlePhotoUpload,
+  appointments,
+  updatePatient,
+}) => {
   const {
     isModalOpen,
     itemToDelete,
@@ -75,7 +80,6 @@ const Pacientes = () => {
 
   const componentRef = useRef();
 
-  // ---- Impresión ----
   const handlePrint = useReactToPrint({
     content: () => componentRef.current,
     documentTitle: `Historial Clínico de ${selectedPatient?.name}`,
@@ -89,26 +93,10 @@ const Pacientes = () => {
     `,
   });
 
-  // ---- onSnapshot: colección 'pacientes' (en tiempo real) ----
-  useEffect(() => {
-    const pacientesRef = collection(db, "pacientes");
-    const unsubscribe = onSnapshot(pacientesRef, (snapshot) => {
-      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      setPatients(data);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // ---- Helpers CRUD (manteniendo tu flujo y nombres) ----
   const openAddPatientModal = () => {
     setNewPatient({ name: "", phone: "", email: "", photo: "" });
     setEditingPatientIndex(null);
     openModal();
-  };
-
-  const editPatient = (index) => {
-    setEditingPatientIndex(index);
-    setNewPatient(patients[index]);
   };
 
   const openEditPatientModal = (index) => {
@@ -116,55 +104,11 @@ const Pacientes = () => {
     openModal();
   };
 
-  const addOrUpdatePatient = async () => {
-    const pacientesRef = collection(db, "pacientes");
-
-    if (editingPatientIndex !== null) {
-      const patient = patients[editingPatientIndex];
-      const docRef = doc(db, "pacientes", patient.id);
-      const { id, historialClinico: _hc, ...payload } = newPatient; // evitar guardar 'id' como campo
-      await updateDoc(docRef, payload);
-    } else {
-      await addDoc(pacientesRef, {
-        name: newPatient.name || "",
-        phone: newPatient.phone || "",
-        email: newPatient.email || "",
-        photo: newPatient.photo || "",
-      });
-    }
-  };
-
-  const handleSavePatient = async () => {
-    await addOrUpdatePatient();
+  const handleSavePatient = () => {
+    addOrUpdatePatient();
     closeModal();
   };
 
-  const deletePatient = async (index) => {
-    const patient = patients[index];
-    if (!patient) return;
-    const docRef = doc(db, "pacientes", patient.id);
-    await deleteDoc(docRef);
-  };
-
-  const handleConfirmDeletePatient = async () => {
-    if (itemToDelete !== null) {
-      await deletePatient(itemToDelete);
-      cancelDelete();
-    }
-  };
-
-  // ---- Foto (base64 para guardar en Firestore) ----
-  const handlePhotoUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setNewPatient((prev) => ({ ...prev, photo: reader.result }));
-    };
-    reader.readAsDataURL(file);
-  };
-
-  // ---- Historia de tratamientos (modal) ----
   const handleViewTreatmentHistory = (patient) => {
     setSelectedPatient(patient);
     setTreatmentHistoryModalOpen(true);
@@ -173,21 +117,18 @@ const Pacientes = () => {
   const handleCloseTreatmentHistory = () => {
     setTreatmentHistoryModalOpen(false);
     setSelectedPatient(null);
-  };
+  }
 
-  // ---- Historia clínica (modal + guardar en Firestore) ----
   const handleOpenHistory = (patient) => {
     setSelectedPatient(patient);
-    setHistorialClinico(
-      patient.historialClinico || {
-        edad: "",
-        antecedentesPersonales: "",
-        antecedentesFamiliares: "",
-        medicacionHabitual: "",
-        alergias: "",
-        observaciones: "",
-      }
-    );
+    setHistorialClinico(patient.historialClinico || {
+      edad: "",
+      antecedentesPersonales: "",
+      antecedentesFamiliares: "",
+      medicacionHabitual: "",
+      alergias: "",
+      observaciones: "",
+    });
     setHistoryModalOpen(true);
   };
 
@@ -206,42 +147,47 @@ const Pacientes = () => {
 
   const handleHistorialChange = (e) => {
     const { id, value } = e.target;
-    setHistorialClinico((prev) => ({ ...prev, [id]: value }));
+    setHistorialClinico(prevHistorial => ({
+      ...prevHistorial,
+      [id]: value,
+    }));
   };
 
-  const updatePatient = async (index, updated) => {
-    const patient = patients[index];
-    if (!patient) return;
-    const docRef = doc(db, "pacientes", patient.id);
-    const { id, ...payload } = updated; // no guardar 'id' como campo
-    await updateDoc(docRef, payload);
-  };
-
-  const handleSaveHistory = async () => {
+  const handleSaveHistory = () => {
     if (selectedPatient) {
-      const idx = patients.findIndex((p) => p.id === selectedPatient.id);
-      if (idx !== -1) {
-        await updatePatient(idx, { ...selectedPatient, historialClinico });
+      const patientIndex = patients.findIndex(p => p.email === selectedPatient.email);
+      if (patientIndex !== -1) {
+        updatePatient(patientIndex, { ...selectedPatient, historialClinico: historialClinico });
       }
       handleCloseHistory();
     }
   };
 
-  // ---- Filtro + mapeo (con índice consistente al array original) ----
-  const filteredPatients = patients.filter((p) =>
-    p.name?.toLowerCase().includes(filter.toLowerCase())
+  const handleConfirmDeletePatient = () => {
+    if (itemToDelete !== null) {
+      deletePatient(itemToDelete);
+      cancelDelete();
+    }
+  };
+
+  const filteredPatients = patients.filter((patient) =>
+    patient.name.toLowerCase().includes(filter.toLowerCase())
   );
 
   return (
     <div className="bg-white p-6 rounded-2xl shadow-lg">
       <h2 className="text-2xl font-semibold text-pink-600 mb-4">Gestión de Pacientes</h2>
-
       <div className="flex justify-between mb-6 items-center">
         <button
           onClick={openAddPatientModal}
           className="bg-pink-500 text-white px-6 py-2 rounded hover:bg-pink-600 transition mb-4 flex items-center space-x-2"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-5 w-5"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+          >
             <path
               fillRule="evenodd"
               d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z"
@@ -263,89 +209,101 @@ const Pacientes = () => {
         <h3 className="text-2xl font-bold text-gray-800 mb-4">Lista de Pacientes</h3>
         <ul className="space-y-4 max-h-[70vh] overflow-y-auto">
           {filteredPatients.length > 0 ? (
-            filteredPatients.map((patient) => {
-              const originalIndex = patients.findIndex((p) => p.id === patient.id);
-              return (
-                <li
-                  key={patient.id}
-                  className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-shadow duration-300"
-                >
-                  <div className="flex items-center space-x-4">
-                    {patient.photo ? (
-                      <img src={patient.photo} alt={patient.name} className="w-16 h-16 rounded-full object-cover" />
-                    ) : (
-                      <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 font-bold text-2xl">
-                        {patient.name?.charAt(0)}
-                      </div>
-                    )}
-                    <div>
-                      <p className="text-lg font-semibold text-gray-800">{patient.name}</p>
-                      <p className="text-gray-500 text-sm">{patient.phone}</p>
-                      <p className="text-gray-500 text-sm">{patient.email}</p>
+            filteredPatients.map((patient, index) => (
+              <li
+                key={index}
+                className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-shadow duration-300"
+              >
+                <div className="flex items-center space-x-4">
+                  {patient.photo ? (
+                    <img src={patient.photo} alt={patient.name} className="w-16 h-16 rounded-full object-cover" />
+                  ) : (
+                    <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 font-bold text-2xl">
+                      {patient.name.charAt(0)}
                     </div>
+                  )}
+                  <div>
+                    <p className="text-lg font-semibold text-gray-800">{patient.name}</p>
+                    <p className="text-gray-500 text-sm">{patient.phone}</p>
+                    <p className="text-gray-500 text-sm">{patient.email}</p>
                   </div>
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={() => handleViewTreatmentHistory(patient)}
-                      className="bg-purple-500 text-white px-4 py-2 rounded text-sm hover:bg-purple-600 transition-colors flex items-center space-x-1"
+                </div>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => handleViewTreatmentHistory(patient)}
+                    className="bg-purple-500 text-white px-4 py-2 rounded text-sm hover:bg-purple-600 transition-colors flex items-center space-x-1"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path
-                          fillRule="evenodd"
-                          d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                      <span>Historial</span>
-                    </button>
-                    <button
-                      onClick={() => handleOpenHistory(patient)}
-                      className="bg-blue-500 text-white px-4 py-2 rounded text-sm hover:bg-blue-600 transition-colors flex items-center space-x-1"
+                      <path
+                        fillRule="evenodd"
+                        d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    <span>Historial</span>
+                  </button>
+                  <button
+                    onClick={() => handleOpenHistory(patient)}
+                    className="bg-blue-500 text-white px-4 py-2 rounded text-sm hover:bg-blue-600 transition-colors flex items-center space-x-1"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                     >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="h-4 w-4"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                        <polyline points="14 2 14 8 20 8"></polyline>
-                        <line x1="16" y1="13" x2="8" y2="13"></line>
-                        <line x1="16" y1="17" x2="8" y2="17"></line>
-                        <line x1="10" y1="9" x2="8" y2="9"></line>
-                      </svg>
-                      <span>Historia Clínica</span>
-                    </button>
-                    <button
-                      onClick={() => openEditPatientModal(originalIndex)}
-                      className="bg-yellow-400 text-white px-4 py-2 rounded text-sm hover:bg-yellow-500 transition-colors flex items-center space-x-1"
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <polyline points="14 2 14 8 20 8"></polyline>
+                      <line x1="16" y1="13" x2="8" y2="13"></line>
+                      <line x1="16" y1="17" x2="8" y2="17"></line>
+                      <line x1="10" y1="9" x2="8" y2="9"></line>
+                    </svg>
+                    <span>Historia Clínica</span>
+                  </button>
+                  <button
+                    onClick={() => openEditPatientModal(index)}
+                    className="bg-yellow-400 text-white px-4 py-2 rounded text-sm hover:bg-yellow-500 transition-colors flex items-center space-x-1"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                      </svg>
-                      <span>Editar</span>
-                    </button>
-                    <button
-                      onClick={() => confirmDelete(originalIndex)}
-                      className="bg-red-500 text-white px-4 py-2 rounded text-sm hover:bg-red-600 transition-colors flex items-center space-x-1"
+                      <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                    </svg>
+                    <span>Editar</span>
+                  </button>
+                  <button
+                    onClick={() => confirmDelete(index)}
+                    className="bg-red-500 text-white px-4 py-2 rounded text-sm hover:bg-red-600 transition-colors flex items-center space-x-1"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path
-                          fillRule="evenodd"
-                          d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                      <span>Eliminar</span>
-                    </button>
-                  </div>
-                </li>
-              );
-            })
+                      <path
+                        fillRule="evenodd"
+                        d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    <span>Eliminar</span>
+                  </button>
+                </div>
+              </li>
+            ))
           ) : (
             <p className="text-center text-gray-500">No se encontraron pacientes.</p>
           )}
@@ -427,10 +385,11 @@ const Pacientes = () => {
         title={`Historia Clínica de ${selectedPatient?.name}`}
         isOpen={historyModalOpen}
         onClose={handleCloseHistory}
-        size="md"
+        size="md" // Nuevo prop para un modal más pequeño
       >
         {selectedPatient && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Campo de Edad */}
             <div className="flex flex-col">
               <label htmlFor="edad" className="text-gray-700 text-sm font-semibold mb-1">Edad:</label>
               <input
@@ -441,6 +400,7 @@ const Pacientes = () => {
                 onChange={handleHistorialChange}
               />
             </div>
+            {/* Campo de Antecedentes Personales */}
             <div className="flex flex-col">
               <label htmlFor="antecedentesPersonales" className="text-gray-700 text-sm font-semibold mb-1">Antecedentes Personales:</label>
               <input
@@ -451,6 +411,7 @@ const Pacientes = () => {
                 onChange={handleHistorialChange}
               />
             </div>
+            {/* Campo de Antecedentes Familiares */}
             <div className="flex flex-col">
               <label htmlFor="antecedentesFamiliares" className="text-gray-700 text-sm font-semibold mb-1">Antecedentes Familiares:</label>
               <input
@@ -461,6 +422,7 @@ const Pacientes = () => {
                 onChange={handleHistorialChange}
               />
             </div>
+            {/* Campo de Medicación Habitual */}
             <div className="flex flex-col">
               <label htmlFor="medicacionHabitual" className="text-gray-700 text-sm font-semibold mb-1">Medicación Habitual:</label>
               <input
@@ -471,6 +433,7 @@ const Pacientes = () => {
                 onChange={handleHistorialChange}
               />
             </div>
+            {/* Campo de Alergias */}
             <div className="flex flex-col">
               <label htmlFor="alergias" className="text-gray-700 text-sm font-semibold mb-1">Alergias:</label>
               <input
@@ -481,6 +444,7 @@ const Pacientes = () => {
                 onChange={handleHistorialChange}
               />
             </div>
+            {/* Campo de Observaciones (ocupa 2 columnas) */}
             <div className="flex flex-col col-span-1 md:col-span-2">
               <label htmlFor="observaciones" className="text-gray-700 text-sm font-semibold mb-1">Observaciones:</label>
               <textarea
