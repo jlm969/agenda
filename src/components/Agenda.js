@@ -45,6 +45,7 @@ const Agenda = ({ patients, consultorios, treatments }) => {
 
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [appointmentToDelete, setAppointmentToDelete] = useState(null);
+  const [openDropdown, setOpenDropdown] = useState(null); // Nuevo estado para controlar los dropdowns
 
   const timeSlots = generateTimeSlots();
   const weekDays = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -124,6 +125,7 @@ const Agenda = ({ patients, consultorios, treatments }) => {
     setIsEditing(false);
     setCancelReason("");
     setAppointmentToDelete(null);
+    setOpenDropdown(null);
   };
 
   // === LÓGICA DE ACCIONES ===
@@ -279,10 +281,10 @@ const Agenda = ({ patients, consultorios, treatments }) => {
           <tbody className="bg-white divide-y divide-gray-200">
             {timeSlots.map((time, ti) => (
               <tr key={ti}>
-                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{time}</td>
+                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500">{time}</td>
                 {getWeekDays().map((day, di) => {
                   const appointment = isAppointmentBooked(day, time);
-                  let cellClass = "bg-white hover:bg-gray-100 cursor-pointer";
+                  let cellClass = "bg-gray-100 hover:bg-gray-200 cursor-pointer";
                   if (appointment) {
                     if (appointment.status === 'Finalizado') cellClass = "bg-green-200 text-green-900 cursor-pointer hover:bg-green-300";
                     else if (appointment.status === 'Cancelado') cellClass = "bg-red-400 text-red-950 font-semibold cursor-pointer hover:bg-red-500";
@@ -290,7 +292,7 @@ const Agenda = ({ patients, consultorios, treatments }) => {
                   }
 
                   return (
-                    <td key={di} className={`px-2 py-2 text-xs text-center border ${cellClass}`} onClick={() => handleSlotClick(day, time)}>
+                    <td key={di} className={`px-2 py-0.5 text-xs text-center border ${cellClass}`} onClick={() => handleSlotClick(day, time)}>
                       {appointment ? (
                         <div>
                           <p className="font-bold">{appointment.patientName}</p>
@@ -337,18 +339,68 @@ const Agenda = ({ patients, consultorios, treatments }) => {
               <p><strong>Fecha:</strong> {new Date(newAppointment.date + 'T00:00:00').toLocaleDateString('es-AR')}</p>
               <p><strong>Hora:</strong> {newAppointment.time}</p>
               
-              <select disabled={isFinishing || isCancelling || isReassigning} value={newAppointment.consultorio || ''} onChange={e => setNewAppointment({ ...newAppointment, consultorio: e.target.value })} className="border p-3 rounded w-full">
-                <option value="">Seleccionar consultorio</option>
-                {consultorios.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
-              </select>
-              <select disabled={isFinishing || isCancelling} value={newAppointment.patientName || ''} onChange={e => setNewAppointment({ ...newAppointment, patientName: e.target.value })} className="border p-3 rounded w-full">
-                <option value="">Seleccionar paciente</option>
-                {patients.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
-              </select>
-              <select disabled={isFinishing || isCancelling} value={newAppointment.treatment || ''} onChange={e => setNewAppointment({ ...newAppointment, treatment: e.target.value })} className="border p-3 rounded w-full">
-                <option value="">Seleccionar tratamiento</option>
-                {treatments.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
-              </select>
+              {/* Dropdown de Consultorios */}
+              <div className="relative">
+                <button
+                    onClick={() => setOpenDropdown(openDropdown === 'consultorio' ? null : 'consultorio')}
+                    className="w-full border p-3 rounded text-left flex justify-between items-center"
+                    disabled={isFinishing || isCancelling || isReassigning}
+                >
+                    {newAppointment.consultorio || 'Seleccionar consultorio'}
+                    <span className="ml-2">&#9660;</span>
+                </button>
+                {openDropdown === 'consultorio' && (
+                  <ul className="absolute z-10 w-full mt-1 border rounded bg-white shadow-lg max-h-40 overflow-y-auto">
+                    {consultorios && consultorios.map(c => (
+                      <li key={c.id} onClick={() => { setNewAppointment({...newAppointment, consultorio: c.name}); setOpenDropdown(null); }} className="p-3 hover:bg-gray-100 cursor-pointer">
+                        {c.name}
+                      </li>
+                    ))}
+                 </ul>
+                )}
+              </div>
+
+              {/* Dropdown de Pacientes */}
+              <div className="relative">
+                <button
+                    onClick={() => setOpenDropdown(openDropdown === 'paciente' ? null : 'paciente')}
+                    className="w-full border p-3 rounded text-left flex justify-between items-center"
+                    disabled={isFinishing || isCancelling}
+                >
+                    {newAppointment.patientName || 'Seleccionar paciente'}
+                    <span className="ml-2">&#9660;</span>
+                </button>
+                {openDropdown === 'paciente' && (
+                  <ul className="absolute z-10 w-full mt-1 border rounded bg-white shadow-lg max-h-40 overflow-y-auto">
+                    {patients && patients.map(p => (
+                      <li key={p.id} onClick={() => { setNewAppointment({...newAppointment, patientName: p.name}); setOpenDropdown(null); }} className="p-3 hover:bg-gray-100 cursor-pointer">
+                        {p.name}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Dropdown de Tratamientos */}
+              <div className="relative">
+                <button
+                    onClick={() => setOpenDropdown(openDropdown === 'tratamiento' ? null : 'tratamiento')}
+                    className="w-full border p-3 rounded text-left flex justify-between items-center"
+                    disabled={isFinishing || isCancelling}
+                >
+                    {newAppointment.treatment || 'Seleccionar tratamiento'}
+                    <span className="ml-2">&#9660;</span>
+                </button>
+                {openDropdown === 'tratamiento' && (
+                  <ul className="absolute z-10 w-full mt-1 border rounded bg-white shadow-lg max-h-40 overflow-y-auto">
+                    {treatments && treatments.map(t => (
+                      <li key={t.id} onClick={() => { setNewAppointment({...newAppointment, treatment: t.name}); setOpenDropdown(null); }} className="p-3 hover:bg-gray-100 cursor-pointer">
+                        {t.name}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             
               {isFinishing && (
                 <>
