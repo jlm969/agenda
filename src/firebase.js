@@ -1,6 +1,7 @@
 // Importa las funciones de Firebase
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 
 // Configuración de tu app (la que ya me pasaste)
 const firebaseConfig = {
@@ -16,6 +17,11 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 // Inicializar Firestore
-export const db = getFirestore(app);
+const db = getFirestore(app);
+
+// Obtener la instancia de autenticaci
+const auth = getAuth(app);
+export { db, auth };
+
 
 
