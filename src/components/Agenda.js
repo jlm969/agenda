@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
 import Modal from "./Modal";
+import SearchableDropdown from "./SearchableDropdown";
 
 // Helper para generar los turnos de 30 minutos
 const generateTimeSlots = () => {
@@ -45,7 +46,6 @@ const Agenda = ({ patients, consultorios, treatments }) => {
 
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [appointmentToDelete, setAppointmentToDelete] = useState(null);
-  const [openDropdown, setOpenDropdown] = useState(null); // Nuevo estado para controlar los dropdowns
 
   const timeSlots = generateTimeSlots();
   const weekDays = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -125,7 +125,6 @@ const Agenda = ({ patients, consultorios, treatments }) => {
     setIsEditing(false);
     setCancelReason("");
     setAppointmentToDelete(null);
-    setOpenDropdown(null);
   };
 
   // === LÓGICA DE ACCIONES ===
@@ -215,36 +214,36 @@ const Agenda = ({ patients, consultorios, treatments }) => {
     const baseAction = { label: "Cerrar", onClick: closeModal, className: "bg-gray-300 text-gray-700 hover:bg-gray-400" };
 
     if (isAdding) {
-        actions = [baseAction, { label: "Agendar", onClick: handleAddAppointment }];
+      actions = [baseAction, { label: "Agendar", onClick: handleAddAppointment }];
     } else if (isViewing) {
-        if (!isCompleted && !isCancelled) {
-            actions = [
-                baseAction,
-                { label: "Editar", onClick: () => setIsEditing(true), className: "bg-yellow-400 text-white hover:bg-yellow-500" },
-                { label: "Cancelar", onClick: () => setIsCancelling(true), className: "bg-red-500 text-white hover:bg-red-600" },
-                { label: "Eliminar", onClick: () => { confirmDeleteAppointment(selectedAppointmentDetails); setAppointmentModalOpen(false); }, className: "bg-red-500 text-white hover:bg-red-600" },
-                { label: "Finalizar", onClick: () => setIsFinishing(true), className: "bg-green-500 text-white hover:bg-green-600" }
-            ];
-        } else if (isCompleted) {
-            actions = [
-                baseAction,
-                { label: "Actualizar Notas", onClick: () => setIsFinishing(true), className: "bg-green-500 text-white hover:bg-green-600" }
-            ];
-        } else if (isCancelled) {
-            actions = [
-                baseAction,
-                { label: "Reasignar", onClick: () => setIsReassigning(true), className: "bg-blue-500 text-white hover:bg-blue-600" },
-                { label: "Eliminar", onClick: () => { confirmDeleteAppointment(selectedAppointmentDetails); setAppointmentModalOpen(false); }, className: "bg-red-500 text-white hover:bg-red-600" },
-            ];
-        }
+      if (!isCompleted && !isCancelled) {
+        actions = [
+          baseAction,
+          { label: "Editar", onClick: () => setIsEditing(true), className: "bg-yellow-400 text-white hover:bg-yellow-500" },
+          { label: "Cancelar", onClick: () => setIsCancelling(true), className: "bg-red-500 text-white hover:bg-red-600" },
+          { label: "Eliminar", onClick: () => { confirmDeleteAppointment(selectedAppointmentDetails); setAppointmentModalOpen(false); }, className: "bg-red-500 text-white hover:bg-red-600" },
+          { label: "Finalizar", onClick: () => setIsFinishing(true), className: "bg-green-500 text-white hover:bg-green-600" }
+        ];
+      } else if (isCompleted) {
+        actions = [
+          baseAction,
+          { label: "Actualizar Notas", onClick: () => setIsFinishing(true), className: "bg-green-500 text-white hover:bg-green-600" }
+        ];
+      } else if (isCancelled) {
+        actions = [
+          baseAction,
+          { label: "Reasignar", onClick: () => setIsReassigning(true), className: "bg-blue-500 text-white hover:bg-blue-600" },
+          { label: "Eliminar", onClick: () => { confirmDeleteAppointment(selectedAppointmentDetails); setAppointmentModalOpen(false); }, className: "bg-red-500 text-white hover:bg-red-600" },
+        ];
+      }
     } else if (isEditing) {
-        actions = [baseAction, { label: "Guardar Cambios", onClick: handleUpdateAppointment }];
+      actions = [baseAction, { label: "Guardar Cambios", onClick: handleUpdateAppointment }];
     } else if (isReassigning) {
-        actions = [baseAction, { label: "Reasignar", onClick: handleReassignAppointment }];
+      actions = [baseAction, { label: "Reasignar", onClick: handleReassignAppointment }];
     } else if (isFinishing) {
-        actions = [baseAction, { label: "Guardar", onClick: handleSaveFinishedTreatment }];
+      actions = [baseAction, { label: "Guardar", onClick: handleSaveFinishedTreatment }];
     } else if (isCancelling) {
-        actions = [baseAction, { label: "Confirmar", onClick: handleCancelAppointment, className: "bg-red-500 text-white hover:bg-red-600" }];
+      actions = [baseAction, { label: "Confirmar", onClick: handleCancelAppointment, className: "bg-red-500 text-white hover:bg-red-600" }];
     }
     return actions;
   };
@@ -269,6 +268,7 @@ const Agenda = ({ patients, consultorios, treatments }) => {
               {getWeekDays().map((day, i) => (
                 <th
                   key={i}
+                  // ↓↓↓ LA FUNCIÓN ONCLICK FUE AGREGADA AQUÍ ↓↓↓
                   onClick={() => handleDayHeaderClick(day)}
                   className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-pink-100 transition-colors"
                 >
@@ -335,73 +335,43 @@ const Agenda = ({ patients, consultorios, treatments }) => {
               )}
             </div>
           ) : (
-            <div className="flex flex-col gap-4">
+            <div>
               <p><strong>Fecha:</strong> {new Date(newAppointment.date + 'T00:00:00').toLocaleDateString('es-AR')}</p>
               <p><strong>Hora:</strong> {newAppointment.time}</p>
               
               {/* Dropdown de Consultorios */}
-              <div className="relative">
-                <button
-                    onClick={() => setOpenDropdown(openDropdown === 'consultorio' ? null : 'consultorio')}
-                    className="w-full border p-3 rounded text-left flex justify-between items-center"
-                    disabled={isFinishing || isCancelling || isReassigning}
-                >
-                    {newAppointment.consultorio || 'Seleccionar consultorio'}
-                    <span className="ml-2">&#9660;</span>
-                </button>
-                {openDropdown === 'consultorio' && (
-                  <ul className="absolute z-10 w-full mt-1 border rounded bg-white shadow-lg max-h-40 overflow-y-auto">
-                    {consultorios && consultorios.map(c => (
-                      <li key={c.id} onClick={() => { setNewAppointment({...newAppointment, consultorio: c.name}); setOpenDropdown(null); }} className="p-3 hover:bg-gray-100 cursor-pointer">
-                        {c.name}
-                      </li>
-                    ))}
-                 </ul>
-                )}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700">Consultorio</label>
+                <SearchableDropdown
+                  options={consultorios}
+                  placeholder="Buscar consultorio..."
+                  onSelect={(selectedOption) => setNewAppointment({ ...newAppointment, consultorio: selectedOption.name })}
+                  value={newAppointment.consultorio || ''}
+                />
               </div>
 
               {/* Dropdown de Pacientes */}
-              <div className="relative">
-                <button
-                    onClick={() => setOpenDropdown(openDropdown === 'paciente' ? null : 'paciente')}
-                    className="w-full border p-3 rounded text-left flex justify-between items-center"
-                    disabled={isFinishing || isCancelling}
-                >
-                    {newAppointment.patientName || 'Seleccionar paciente'}
-                    <span className="ml-2">&#9660;</span>
-                </button>
-                {openDropdown === 'paciente' && (
-                  <ul className="absolute z-10 w-full mt-1 border rounded bg-white shadow-lg max-h-40 overflow-y-auto">
-                    {patients && patients.map(p => (
-                      <li key={p.id} onClick={() => { setNewAppointment({...newAppointment, patientName: p.name}); setOpenDropdown(null); }} className="p-3 hover:bg-gray-100 cursor-pointer">
-                        {p.name}
-                      </li>
-                    ))}
-                  </ul>
-                )}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700">Paciente</label>
+                <SearchableDropdown
+                  options={patients}
+                  placeholder="Buscar paciente..."
+                  onSelect={(selectedOption) => setNewAppointment({ ...newAppointment, patientName: selectedOption.name })}
+                  value={newAppointment.patientName || ''}
+                />
               </div>
 
               {/* Dropdown de Tratamientos */}
-              <div className="relative">
-                <button
-                    onClick={() => setOpenDropdown(openDropdown === 'tratamiento' ? null : 'tratamiento')}
-                    className="w-full border p-3 rounded text-left flex justify-between items-center"
-                    disabled={isFinishing || isCancelling}
-                >
-                    {newAppointment.treatment || 'Seleccionar tratamiento'}
-                    <span className="ml-2">&#9660;</span>
-                </button>
-                {openDropdown === 'tratamiento' && (
-                  <ul className="absolute z-10 w-full mt-1 border rounded bg-white shadow-lg max-h-40 overflow-y-auto">
-                    {treatments && treatments.map(t => (
-                      <li key={t.id} onClick={() => { setNewAppointment({...newAppointment, treatment: t.name}); setOpenDropdown(null); }} className="p-3 hover:bg-gray-100 cursor-pointer">
-                        {t.name}
-                      </li>
-                    ))}
-                  </ul>
-                )}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700">Tratamiento</label>
+                <SearchableDropdown
+                  options={treatments}
+                  placeholder="Buscar tratamiento..."
+                  onSelect={(selectedOption) => setNewAppointment({ ...newAppointment, treatment: selectedOption.name })}
+                  value={newAppointment.treatment || ''}
+                />
               </div>
-            
+              
               {isFinishing && (
                 <>
                   <textarea placeholder="Notas del tratamiento" className="border p-3 rounded w-full mt-2" value={newAppointment.notes || ''} onChange={e => setNewAppointment({ ...newAppointment, notes: e.target.value })} />
