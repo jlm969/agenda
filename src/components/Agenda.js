@@ -128,7 +128,6 @@ const Agenda = ({ patients, consultorios, treatments }) => {
   };
 
   // === LÓGICA DE ACCIONES ===
-
   const handleAddAppointment = async () => {
     if (newAppointment.patientName && newAppointment.consultorio && newAppointment.treatment) {
       const existing = turnos.some(a => a.date === newAppointment.date && a.time === newAppointment.time && a.consultorio === newAppointment.consultorio);
@@ -262,15 +261,14 @@ const Agenda = ({ patients, consultorios, treatments }) => {
 
       <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
         <table className="min-w-full divide-y divide-gray-200 table-fixed">
-          <thead className="bg-pink-50 sticky top-0 z-10">
+          <thead className="bg-pink-50 z-20">
             <tr>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hora</th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky top-0 left-0 bg-pink-50 z-30">Hora</th>
               {getWeekDays().map((day, i) => (
                 <th
                   key={i}
-                  // ↓↓↓ LA FUNCIÓN ONCLICK FUE AGREGADA AQUÍ ↓↓↓
                   onClick={() => handleDayHeaderClick(day)}
-                  className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-pink-100 transition-colors"
+                  className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-pink-100 transition-colors sticky top-0 bg-pink-50 z-20"
                 >
                   {weekDays[i]} <br/>
                   <span className="text-sm font-semibold">{day.getDate()}</span>
@@ -281,7 +279,7 @@ const Agenda = ({ patients, consultorios, treatments }) => {
           <tbody className="bg-white divide-y divide-gray-200">
             {timeSlots.map((time, ti) => (
               <tr key={ti}>
-                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500">{time}</td>
+                <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-500 sticky left-0 bg-white z-10">{time}</td>
                 {getWeekDays().map((day, di) => {
                   const appointment = isAppointmentBooked(day, time);
                   let cellClass = "bg-gray-100 hover:bg-gray-200 cursor-pointer";

@@ -12,144 +12,153 @@ import { collection, onSnapshot } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
 function App() {
- // === ESTADO DE AUTENTICACIÓN ===
- const [user, setUser] = useState(null);
- const [loading, setLoading] = useState(true);
+  // === ESTADO DE AUTENTICACIÓN ===
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
- // === EFECTO PARA ESCUCHAR CAMBIOS DE AUTENTICACIÓN ===
- useEffect(() => {
-  const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-   setUser(currentUser);
-   setLoading(false);
-  });
-  return () => unsubscribe();
- }, []);
+  // === EFECTO PARA ESCUCHAR CAMBIOS DE AUTENTICACIÓN ===
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
- // === ESTADOS CON FIREBASE ===
- const [patients, setPatients] = useState([]);
- const [treatments, setTreatments] = useState([]);
- const [consultorios, setConsultorios] = useState([]);
- const [turnos, setTurnos] = useState([]);
+  // === ESTADOS CON FIREBASE ===
+  const [patients, setPatients] = useState([]);
+  const [treatments, setTreatments] = useState([]);
+  const [consultorios, setConsultorios] = useState([]);
+  const [turnos, setTurnos] = useState([]);
 
- // Carga de Pacientes
- useEffect(() => {
-  if (user) { // Solo carga los datos si el usuario está autenticado
-   const patientsCollection = collection(db, "pacientes");
-   const unsubscribe = onSnapshot(patientsCollection, (snapshot) => {
-    const patientsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    setPatients(patientsList);
-   });
-   return () => unsubscribe();
+  // Carga de Pacientes
+  useEffect(() => {
+    if (user) {
+      const patientsCollection = collection(db, "pacientes");
+      const unsubscribe = onSnapshot(patientsCollection, (snapshot) => {
+        const patientsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setPatients(patientsList);
+      });
+      return () => unsubscribe();
+    }
+  }, [user]);
+
+  // Carga de Tratamientos
+  useEffect(() => {
+    if (user) {
+      const treatmentsCollection = collection(db, "tratamientos");
+      const unsubscribe = onSnapshot(treatmentsCollection, (snapshot) => {
+        const treatmentsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setTreatments(treatmentsList);
+      });
+      return () => unsubscribe();
+    }
+  }, [user]);
+
+  // Carga de Consultorios
+  useEffect(() => {
+      if (user) {
+          const consultoriosCollection = collection(db, "consultorios");
+          const unsubscribe = onSnapshot(consultoriosCollection, (snapshot) => {
+              const consultoriosList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+              setConsultorios(consultoriosList);
+          });
+          return () => unsubscribe();
+      }
+  }, [user]);
+
+  // Carga de Turnos
+  useEffect(() => {
+      if (user) {
+          const turnosCollection = collection(db, "turnos");
+          const unsubscribe = onSnapshot(turnosCollection, (snapshot) => {
+              const turnosList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+              setTurnos(turnosList);
+          });
+          return () => unsubscribe();
+      }
+  }, [user]);
+  
+  // === LÓGICA DE NAVEGACIÓN Y RENDERIZADO ===
+  const [activeTab, setActiveTab] = useState("appointments");
+
+  const getTabButtonClass = (tabName) => {
+      return `px-4 py-2 font-semibold transition-all duration-300 rounded-md text-sm ${
+          activeTab === tabName
+              ? "bg-pink-600 text-white"
+              : "text-gray-600 hover:bg-gray-200"
+      }`;
+  };
+
+  // Muestra una pantalla de carga mientras se verifica el estado de autenticación
+  if (loading) {
+      return (
+          <div className="flex justify-center items-center min-h-screen bg-gray-100 text-pink-700 text-xl">
+              Cargando...
+          </div>
+      );
   }
- }, [user]);
 
- // Carga de Tratamientos
- useEffect(() => {
-  if (user) {
-   const treatmentsCollection = collection(db, "tratamientos");
-   const unsubscribe = onSnapshot(treatmentsCollection, (snapshot) => {
-    const treatmentsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    setTreatments(treatmentsList);
-   });
-   return () => unsubscribe();
+  // Si no está autenticado, muestra el Login dentro del Modal
+  if (!user) {
+      return (
+          <ModalLogin isOpen={!user} title="Iniciar Sesión">
+              <Login />
+          </ModalLogin>
+      );
   }
- }, [user]);
 
- // Carga de Consultorios
- useEffect(() => {
-  if (user) {
-   const consultoriosCollection = collection(db, "consultorios");
-   const unsubscribe = onSnapshot(consultoriosCollection, (snapshot) => {
-    const consultoriosList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    setConsultorios(consultoriosList);
-   });
-   return () => unsubscribe();
-  }
- }, [user]);
-
- // Carga de Turnos
- useEffect(() => {
-  if (user) {
-   const turnosCollection = collection(db, "turnos");
-   const unsubscribe = onSnapshot(turnosCollection, (snapshot) => {
-    const turnosList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    setTurnos(turnosList);
-   });
-   return () => unsubscribe();
-  }
- }, [user]);
- 
- // === LÓGICA DE NAVEGACIÓN Y RENDERIZADO ===
- const [activeTab, setActiveTab] = useState("appointments");
-
- const getTabButtonClass = (tabName) => {
-  return `px-6 py-3 font-semibold transition-all duration-300 ${
-   activeTab === tabName
-    ? "bg-pink-500 text-white rounded-t-lg shadow-md"
-    : "bg-white text-gray-600 rounded-t-lg hover:bg-pink-100"
-  }`;
- };
-
- // Muestra una pantalla de carga mientras se verifica el estado de autenticación
- if (loading) {
+  // Si el usuario está autenticado, muestra la aplicación completa
   return (
-   <div className="flex justify-center items-center min-h-screen bg-gray-100 text-pink-700 text-xl">
-    Cargando...
-   </div>
+      <div className="bg-gradient-to-br from-pink-50 to-pink-100 min-h-screen font-sans">
+          
+          {/* BARRA DE NAVEGACIÓN HORIZONTAL */}
+          <nav className="sticky top-0 z-10 p-4 bg-white shadow-md">
+              {/* Contenedor superior con logo, título y cerrar sesión */}
+              <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center space-x-2">
+                      <img src={logo} alt="Logo LH" className="w-10" />
+                      <h1 className="text-sm font-bold text-pink-800">Liset Herzog - Medicina Estética</h1>
+                  </div>
+                  <div className="flex items-center space-x-2 text-sm">
+                      <span className="text-gray-600">Hola, {user.email}!</span>
+                      <Logout />
+                  </div>
+              </div>
+
+              {/* Contenedor inferior de los botones de navegación */}
+              <div className="flex justify-center space-x-2">
+                  <button className={getTabButtonClass("appointments")} onClick={() => setActiveTab("appointments")}>
+                      Agenda
+                  </button>
+                  <button className={getTabButtonClass("patients")} onClick={() => setActiveTab("patients")}>
+                      Pacientes
+                  </button>
+                  <button className={getTabButtonClass("treatments")} onClick={() => setActiveTab("treatments")}>
+                      Tratamientos
+                  </button>
+                  <button className={getTabButtonClass("consultorios")} onClick={() => setActiveTab("consultorios")}>
+                      Consultorios
+                  </button>
+              </div>
+          </nav>
+
+          {/* CONTENIDO PRINCIPAL */}
+          <main className="p-6 max-w-7xl mx-auto">
+              {activeTab === "appointments" && (
+                  <Agenda
+                      patients={patients}
+                      turnos={turnos}
+                      consultorios={consultorios}
+                      treatments={treatments}
+                  />
+              )}
+              {activeTab === "patients" && <Pacientes patients={patients} />}
+              {activeTab === "treatments" && <Tratamientos treatments={treatments} />}
+              {activeTab === "consultorios" && <Consultorios consultorios={consultorios} />}
+          </main>
+      </div>
   );
- }
-
- // Si no está autenticado, muestra el Login dentro del Modal
- if (!user) {
-  return (
-   <ModalLogin isOpen={!user} title="Iniciar Sesión">
-    <Login />
-   </ModalLogin>
-  );
- }
-
- // Si el usuario está autenticado, muestra la aplicación completa
- return (
-  <div className="p-6 bg-gradient-to-br from-pink-50 to-pink-100 min-h-screen font-sans">
-   <header className="flex flex-col items-center mb-10">
-    <img src={logo} alt="Logo LH" className="w-48 mb-4" />
-    <h1 className="text-3xl font-bold text-pink-800">Liset Herzog - Medicina Estética</h1>
-    <div className="mt-4 text-gray-600 flex items-center space-x-4">
-     <span className="font-medium">Hola, {user.email}!</span>
-     <Logout />
-    </div>
-   </header>
-
-   <div className="flex justify-center mb-6">
-    <button className={getTabButtonClass("appointments")} onClick={() => setActiveTab("appointments")}>
-     Agenda
-    </button>
-    <button className={getTabButtonClass("patients")} onClick={() => setActiveTab("patients")}>
-     Pacientes
-    </button>
-    <button className={getTabButtonClass("treatments")} onClick={() => setActiveTab("treatments")}>
-     Tratamientos
-    </button>
-    <button className={getTabButtonClass("consultorios")} onClick={() => setActiveTab("consultorios")}>
-     Consultorios
-    </button>
-   </div>
-
-   <div className="max-w-6xl mx-auto p-6 bg-white rounded-2xl shadow-lg">
-    {activeTab === "appointments" && (
-     <Agenda
-      patients={patients}
-      turnos={turnos}
-      consultorios={consultorios}
-      treatments={treatments}
-     />
-    )}
-    {activeTab === "patients" && <Pacientes patients={patients} />}
-    {activeTab === "treatments" && <Tratamientos treatments={treatments} />}
-    {activeTab === "consultorios" && <Consultorios consultorios={consultorios} />}
-   </div>
-  </div>
- );
 }
 
 export default App;
