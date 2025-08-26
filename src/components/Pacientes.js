@@ -4,7 +4,7 @@ import useCRUDModal from "../hooks/useCRUDModal";
 import PatientHistoryModal from "./PatientHistoryModal";
 import { useReactToPrint } from "react-to-print";
 import { AiOutlinePrinter } from "react-icons/ai";
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from "firebase/firestore";
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 
 // Componente para imprimir el historial clínico
@@ -49,7 +49,6 @@ const Pacientes = () => {
   const [newPatient, setNewPatient] = useState({ name: "", phone: "", email: "", photo: "" });
   const [editingPatientIndex, setEditingPatientIndex] = useState(null);
   const [filter, setFilter] = useState("");
-  const [appointments] = useState([]); // Se puede sincronizar luego cuando integremos Agenda
 
   const {
     isModalOpen,
@@ -62,6 +61,10 @@ const Pacientes = () => {
 
   const [treatmentHistoryModalOpen, setTreatmentHistoryModalOpen] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null);
+  
+  // --- Código agregado para la funcionalidad de Historial de Turnos ---
+  const [turnosDelPaciente, setTurnosDelPaciente] = useState([]);
+  // --- Fin de código agregado ---
 
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [historialClinico, setHistorialClinico] = useState({
@@ -98,6 +101,26 @@ const Pacientes = () => {
     });
     return () => unsubscribe();
   }, []);
+
+  // --- Código agregado para la funcionalidad de Historial de Turnos ---
+  // Este useEffect se activa cuando se selecciona un paciente.
+  useEffect(() => {
+    if (!selectedPatient) return; // No hace nada si no hay un paciente seleccionado
+
+    const turnosRef = collection(db, "turnos");
+    const q = query(turnosRef, where("patientName", "==", selectedPatient.name));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const turnosList = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setTurnosDelPaciente(turnosList); // Actualiza el estado con los turnos encontrados
+    });
+
+    return () => unsubscribe(); // Limpia el listener cuando el componente se desmonta
+  }, [selectedPatient]);
+  // --- Fin de código agregado ---
 
   // ---- Helpers CRUD (manteniendo tu flujo y nombres) ----
   const openAddPatientModal = () => {
@@ -173,6 +196,7 @@ const Pacientes = () => {
   const handleCloseTreatmentHistory = () => {
     setTreatmentHistoryModalOpen(false);
     setSelectedPatient(null);
+    setTurnosDelPaciente([]); // Limpia los turnos al cerrar el modal
   };
 
   // ---- Historia clínica (modal + guardar en Firestore) ----
@@ -514,7 +538,7 @@ const Pacientes = () => {
         isOpen={treatmentHistoryModalOpen}
         onClose={handleCloseTreatmentHistory}
         patient={selectedPatient}
-        appointments={appointments}
+        appointments={turnosDelPaciente}
       />
 
       {/* Modal de confirmación de eliminación */}
