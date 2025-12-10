@@ -66,6 +66,7 @@ const Pacientes = () => {
   const [turnosDelPaciente, setTurnosDelPaciente] = useState([]);
   // --- Fin de código agregado ---
 
+
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [historialClinico, setHistorialClinico] = useState({
     edad: "",
@@ -75,6 +76,7 @@ const Pacientes = () => {
     alergias: "",
     observaciones: "",
   });
+  const [historialDirty, setHistorialDirty] = useState(false);
 
   const componentRef = useRef();
 
@@ -201,6 +203,8 @@ const Pacientes = () => {
 
   // ---- Historia clínica (modal + guardar en Firestore) ----
   const handleOpenHistory = (patient) => {
+    setHistorialDirty(false);
+    // No cierres el modal automáticamente
     setSelectedPatient(patient);
     setHistorialClinico(
       patient.historialClinico || {
@@ -231,6 +235,7 @@ const Pacientes = () => {
   const handleHistorialChange = (e) => {
     const { id, value } = e.target;
     setHistorialClinico((prev) => ({ ...prev, [id]: value }));
+    setHistorialDirty(true);
   };
 
   const updatePatient = async (index, updated) => {
@@ -525,7 +530,9 @@ const Pacientes = () => {
           </button>
           <button
             onClick={handlePrint}
-            className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 flex items-center space-x-2 transition-colors"
+            className={`bg-green-500 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors ${historialDirty ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-600'}`}
+            disabled={historialDirty}
+          title={historialDirty ? 'Guarda los cambios antes de imprimir' : 'Imprimir / PDF'}
           >
             <AiOutlinePrinter className="h-5 w-5" />
             <span>Imprimir / PDF</span>

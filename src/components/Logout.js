@@ -1,6 +1,7 @@
 import React from 'react';
 import { signOut } from 'firebase/auth';
-import { auth } from '../firebase'; // ✅ VERIFICA que la ruta a tu archivo firebase sea correcta
+import { auth } from '../firebase'; 
+
 
 const Logout = () => {
  const handleLogout = async () => {
