@@ -21,12 +21,7 @@ const PatientHistoryModal = ({ isOpen, onClose, patient, appointments }) => {
       return timeB - timeA;
     });
 
-  // 👉 Abrir modal con notas
-  // const handleOpenNotes = (notes) => {
-  //    setSelectedNotes(notes || 'No hay notas disponibles.');
-  //    setNotesModalOpen(true);       
-  // };
-
+ // Abrir modal con notas o con Motivo de cancelación
 const handleOpenNotes = (appointment) => {
   let text = '';
 
@@ -41,9 +36,6 @@ const handleOpenNotes = (appointment) => {
   setSelectedNotes(text);
   setNotesModalOpen(true);
 };
-
-
-
 
   return (
     <>
