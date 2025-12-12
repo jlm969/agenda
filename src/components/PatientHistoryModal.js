@@ -22,10 +22,28 @@ const PatientHistoryModal = ({ isOpen, onClose, patient, appointments }) => {
     });
 
   // 👉 Abrir modal con notas
-  const handleOpenNotes = (notes) => {
-    setSelectedNotes(notes || 'No hay notas disponibles.');
-    setNotesModalOpen(true);
-  };
+  // const handleOpenNotes = (notes) => {
+  //    setSelectedNotes(notes || 'No hay notas disponibles.');
+  //    setNotesModalOpen(true);       
+  // };
+
+const handleOpenNotes = (appointment) => {
+  let text = '';
+
+  if (appointment.notes) {
+    text = appointment.notes;
+  } else if (appointment.status === 'Cancelado' && appointment.cancelReason) {
+    text = `Motivo de cancelación:\n${appointment.cancelReason}`;
+  } else {
+    text = 'No hay notas disponibles.';
+  }
+
+  setSelectedNotes(text);
+  setNotesModalOpen(true);
+};
+
+
+
 
   return (
     <>
@@ -57,26 +75,28 @@ const PatientHistoryModal = ({ isOpen, onClose, patient, appointments }) => {
 
                     <div
                       className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                        appointment.status === 'completed'
+                        appointment.status === 'Finalizado'
                           ? 'bg-green-500 text-white'
-                          : appointment.status === 'cancelled'
+                          : appointment.status === 'Cancelado'
                           ? 'bg-red-500 text-white'
                           : 'bg-blue-500 text-white'
                       }`}
                     >
-                      {appointment.status === 'completed'
+                      {appointment.status === 'Finalizado'
                         ? 'Finalizado'
-                        : appointment.status === 'cancelled'
+                        : appointment.status === 'Cancelado'
                         ? 'Cancelado'
                         : 'Confirmado'}
                     </div>
                     
                     {/* BOTÓN PARA ABRIR EL MODAL DE NOTAS */}
                     <button
-                      onClick={() => handleOpenNotes(appointment.notes)}
+                      //onClick={() => handleOpenNotes(appointment.notes)}
+                      onClick={() => handleOpenNotes(appointment)}
                      // className="bg-green-500 text-white px-2 py-2 rounded text-sm hover:bg-green-600 transition flex items-center"
                     
-                       className="bg-green-500 text-white px-3 py-1 rounded-full text-sm hover:bg-green-600 transition-colors flex items-center space-x ml-2"
+                       //className="bg-gray-500 text-white px-3 py-1 rounded-full text-sm hover:bg-gray-600 transition-colors flex items-center space-x ml-2"
+                       className="bg-gray-300 text-white-700 px-3 py-1 rounded-full text-sm hover:bg-gray-400 transition-colors flex items-center space-x ml-2"
                     >
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
