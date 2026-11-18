@@ -27,6 +27,71 @@ const STATUS_STYLES = {
 
 const turnosRef = collection(db, "turnos");
 
+// === WHATSAPP ===
+const CLINIC_NAME = "Liset Herzog - Medicina Estética";
+// Código de área del consultorio, sin 0 ni 15 (ej. "3464"). Se usa solo si el teléfono
+// guardado no trae el código de área. Dejar vacío ("") si todos los teléfonos lo traen.
+const DEFAULT_AREA_CODE = "";
+
+// Convierte un teléfono argentino escrito de cualquier forma al formato que pide WhatsApp
+// (549 + código de área + número, sin 0 ni 15). Devuelve null si no se puede armar.
+const toWhatsAppNumber = (raw) => {
+  let d = String(raw || "").replace(/\D/g, "");
+  if (!d) return null;
+  if (d.startsWith("00")) d = d.slice(2);
+
+  if (d.startsWith("54")) {
+    d = d.slice(2);
+    if (d.startsWith("9")) d = d.slice(1);
+  } else if (d.startsWith("0")) {
+    d = d.slice(1);
+  } else if (d.length === 11 && d.startsWith("9")) {
+    d = d.slice(1);
+  } else if (d.length > 10) {
+    return d; // otro país: se asume que ya trae el código internacional
+  }
+
+  // Número local sin código de área: se completa con el del consultorio
+  if (d.length < 10 && DEFAULT_AREA_CODE) {
+    const a = DEFAULT_AREA_CODE.length;
+    if (d.length === 10 - a) d = DEFAULT_AREA_CODE + d;
+    else if (d.startsWith("15") && d.length === 12 - a) d = DEFAULT_AREA_CODE + d.slice(2);
+  }
+
+  // Con el 15 de celular (12 dígitos): se quita
+  if (d.length === 12) {
+    const areaLengths = d.startsWith("11") ? [2] : [3, 4];
+    for (const a of areaLengths) {
+      if (d.slice(a, a + 2) === "15") {
+        d = d.slice(0, a) + d.slice(a + 2);
+        break;
+      }
+    }
+  }
+
+  return d.length === 10 ? `549${d}` : null;
+};
+
+// Arma el link de WhatsApp para un turno (o el motivo por el que no se puede)
+const getWhatsApp = (appointment, patients) => {
+  const name = (appointment.patientName || "").trim().toLowerCase();
+  const patient = (patients || []).find((p) => (p.name || "").trim().toLowerCase() === name);
+  if (!patient || !String(patient.phone || "").trim()) return { error: "Sin teléfono guardado" };
+
+  const number = toWhatsAppNumber(patient.phone);
+  if (!number) return { error: "Teléfono incompleto: falta el código de área" };
+
+  const day = new Date(appointment.date + "T00:00:00").toLocaleDateString("es-AR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+  const text =
+    `Hola ${appointment.patientName}, te escribimos de ${CLINIC_NAME} por tu turno de ` +
+    `${appointment.treatment}: ${day} a las ${appointment.time}. ¿Nos confirmás que podés asistir? ¡Gracias!`;
+  return { url: `https://wa.me/${number}?text=${encodeURIComponent(text)}` };
+};
+
 // === HELPERS ===
 // Fecha local en formato YYYY-MM-DD (sin pasar por UTC)
 const toDateKey = (date) =>
@@ -61,6 +126,9 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
   const [cancelReason, setCancelReason] = useState("");
   const [isReassigning, setIsReassigning] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [isRescheduling, setIsRescheduling] = useState(false);
+  const [newDate, setNewDate] = useState("");
+  const [newTime, setNewTime] = useState("");
   const [saving, setSaving] = useState(false);
 
   const [dailyModalOpen, setDailyModalOpen] = useState(false);
@@ -90,6 +158,13 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
     return map;
   }, [turnos]);
 
+  // Horarios libres del día elegido para reprogramar (la agenda no atiende los domingos)
+  const isSundayChosen = Boolean(newDate) && new Date(newDate + "T00:00:00").getDay() === 0;
+  const availableTimes = useMemo(() => {
+    if (!isRescheduling || !newDate || isSundayChosen) return [];
+    return TIME_SLOTS.filter((t) => !turnosBySlot.has(`${newDate}|${t}`));
+  }, [isRescheduling, newDate, isSundayChosen, turnosBySlot]);
+
   const dailyAppointments = useMemo(() => {
     if (!selectedDayForModal) return [];
     const key = toDateKey(selectedDayForModal);
@@ -113,6 +188,58 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
 
   const getAppointment = (day, time) => turnosBySlot.get(`${toDateKey(day)}|${time}`);
 
+  // Próximo día de atención (el sábado, el lunes; si no, mañana)
+  const daysToNextWorkDay = new Date().getDay() === 6 ? 2 : 1;
+  const nextWorkDay = (() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + daysToNextWorkDay);
+    return d;
+  })();
+  const nextWorkDayLabel = daysToNextWorkDay === 1 ? "mañana" : "el lunes";
+
+  // Deja registrado que se abrió WhatsApp para avisar al paciente
+  const markReminderSent = async (appointment) => {
+    try {
+      await updateDoc(doc(db, "turnos", appointment.id), { reminderSentAt: Date.now() });
+    } catch (error) {
+      console.error("No se pudo registrar el aviso:", error);
+    }
+  };
+
+  // Botón de WhatsApp (o el motivo por el que no está disponible)
+  const renderWhatsApp = (appointment) => {
+    const { url, error } = getWhatsApp(appointment, patients);
+    if (error) return <span className="text-xs text-gray-500">{error}</span>;
+
+    const live = turnos.find((t) => t.id === appointment.id) || appointment;
+    const sentAt = live.reminderSentAt;
+    return (
+      <>
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => markReminderSent(appointment)}
+          className="inline-block bg-green-600 text-white px-3 py-2 rounded text-sm hover:bg-green-700 transition"
+        >
+          {sentAt ? "Enviar de nuevo" : "Enviar WhatsApp"}
+        </a>
+        {sentAt && (
+          <span className="text-xs text-green-700">
+            Enviado el{" "}
+            {new Date(sentAt).toLocaleString("es-AR", {
+              day: "numeric",
+              month: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </span>
+        )}
+      </>
+    );
+  };
+
   // === MODALES ===
   const closeModal = () => {
     setAppointmentModalOpen(false);
@@ -125,6 +252,9 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
     setIsCancelling(false);
     setIsReassigning(false);
     setIsEditing(false);
+    setIsRescheduling(false);
+    setNewDate("");
+    setNewTime("");
     setCancelReason("");
     setAppointmentToDelete(null);
   };
@@ -255,6 +385,31 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
     });
   };
 
+  const handleRescheduleAppointment = () => {
+    if (!newDate || !newTime) {
+      alert("Elegí la nueva fecha y el nuevo horario.");
+      return;
+    }
+    if (newDate < todayKey) {
+      alert("No se puede reprogramar a una fecha pasada.");
+      return;
+    }
+    if (turnosBySlot.has(`${newDate}|${newTime}`)) {
+      alert("Ese horario ya está ocupado.");
+      return;
+    }
+    runAction(async () => {
+      // Solo cambia fecha y hora; el resto del turno queda igual
+      await updateDoc(doc(db, "turnos", editingAppointmentDocId), {
+        date: newDate,
+        time: newTime,
+        reminderSentAt: null,
+      });
+      setCurrentWeekStart(getStartOfWeek(new Date(newDate + "T00:00:00")));
+      closeModal();
+    });
+  };
+
   const handleConfirmDeleteAppointment = () => {
     if (!appointmentToDelete) return;
     runAction(async () => {
@@ -275,7 +430,12 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
   // === LÓGICA DE RENDERIZADO DEL MODAL ===
   const isAdding = selectedAppointmentDetails === null && !isEditing;
   const isViewing =
-    selectedAppointmentDetails !== null && !isEditing && !isFinishing && !isCancelling && !isReassigning;
+    selectedAppointmentDetails !== null &&
+    !isEditing &&
+    !isFinishing &&
+    !isCancelling &&
+    !isReassigning &&
+    !isRescheduling;
   const isCompleted = selectedAppointmentDetails && selectedAppointmentDetails.status === "Finalizado";
   const isCancelled = selectedAppointmentDetails && selectedAppointmentDetails.status === "Cancelado";
 
@@ -284,6 +444,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
     if (isFinishing) return "Finalizar tratamiento";
     if (isCancelling) return "Cancelar turno";
     if (isReassigning) return "Reasignar turno cancelado";
+    if (isRescheduling) return "Reprogramar turno";
     if (isEditing) return "Editar turno";
     return "Detalles del turno";
   };
@@ -307,7 +468,16 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
         actions = [
           baseAction,
           { label: "Editar", onClick: () => setIsEditing(true), className: "bg-yellow-400 text-white hover:bg-yellow-500" },
-          { label: "Cancelar turno", onClick: () => setIsCancelling(true), className: "bg-red-500 text-white hover:bg-red-600" },
+          {
+            label: "Reprogramar",
+            onClick: () => {
+              setNewDate(selectedAppointmentDetails.date);
+              setNewTime("");
+              setIsRescheduling(true);
+            },
+            className: "bg-blue-500 text-white hover:bg-blue-600",
+          },
+          { label: "Cancelar", onClick: () => setIsCancelling(true), className: "bg-red-500 text-white hover:bg-red-600" },
           deleteAction,
           { label: "Finalizar", onClick: () => setIsFinishing(true), className: "bg-green-500 text-white hover:bg-green-600" },
         ];
@@ -325,6 +495,8 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
       }
     } else if (isEditing) {
       actions = [baseAction, { label: "Guardar cambios", onClick: handleUpdateAppointment }];
+    } else if (isRescheduling) {
+      actions = [baseAction, { label: "Reprogramar", onClick: handleRescheduleAppointment }];
     } else if (isReassigning) {
       actions = [baseAction, { label: "Reasignar", onClick: handleReassignAppointment }];
     } else if (isFinishing) {
@@ -349,6 +521,13 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
           ))}
         </div>
       </div>
+
+      <button
+        onClick={() => handleDayHeaderClick(nextWorkDay)}
+        className="mb-4 w-full sm:w-auto bg-green-600 text-white px-4 py-2 rounded-md text-sm font-semibold hover:bg-green-700 transition-colors"
+      >
+        Recordatorios para {nextWorkDayLabel}
+      </button>
 
       {/* Navegación de semanas */}
       <div className="flex items-center justify-between gap-2 mb-4 bg-white rounded-lg shadow-sm px-3 py-2">
@@ -457,6 +636,11 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
                 <p><strong>Motivo de cancelación:</strong> {selectedAppointmentDetails.cancelReason}</p>
               )}
               {selectedAppointmentDetails.notes && <p><strong>Notas:</strong> {selectedAppointmentDetails.notes}</p>}
+              {selectedAppointmentDetails.status === "Confirmado" && (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {renderWhatsApp(selectedAppointmentDetails)}
+                </div>
+              )}
               {selectedAppointmentDetails.photos && selectedAppointmentDetails.photos.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2">
                   {selectedAppointmentDetails.photos.map((photo, i) => (
@@ -464,6 +648,56 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
                   ))}
                 </div>
               )}
+            </div>
+          ) : isRescheduling ? (
+            <div className="flex flex-col gap-3">
+              <p><strong>Paciente:</strong> {selectedAppointmentDetails?.patientName}</p>
+              <p>
+                <strong>Turno actual:</strong> {formatDate(selectedAppointmentDetails?.date)} a las{" "}
+                {selectedAppointmentDetails?.time}
+              </p>
+              <div>
+                <label htmlFor="nueva-fecha" className="block text-sm font-medium text-gray-700 mb-1">
+                  Nueva fecha
+                </label>
+                <input
+                  id="nueva-fecha"
+                  type="date"
+                  min={todayKey}
+                  value={newDate}
+                  onChange={(e) => {
+                    setNewDate(e.target.value);
+                    setNewTime("");
+                  }}
+                  className="border p-3 rounded w-full"
+                />
+              </div>
+              <div>
+                <label htmlFor="nuevo-horario" className="block text-sm font-medium text-gray-700 mb-1">
+                  Nuevo horario
+                </label>
+                {!newDate ? (
+                  <p className="text-sm text-gray-500">Elegí primero la fecha.</p>
+                ) : isSundayChosen ? (
+                  <p className="text-sm text-red-600">Los domingos no hay agenda. Elegí otro día.</p>
+                ) : availableTimes.length === 0 ? (
+                  <p className="text-sm text-gray-500">No hay horarios libres ese día.</p>
+                ) : (
+                  <select
+                    id="nuevo-horario"
+                    value={newTime}
+                    onChange={(e) => setNewTime(e.target.value)}
+                    className="border p-3 rounded w-full bg-white"
+                  >
+                    <option value="">Elegí un horario</option>
+                    {availableTimes.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
             </div>
           ) : (
             <div>
@@ -580,6 +814,9 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
                   >
                     {a.status}
                   </span>
+                  {a.status === "Confirmado" && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">{renderWhatsApp(a)}</div>
+                  )}
                 </div>
                 {(a.status === "Confirmado" || a.status === "Cancelado") && (
                   <button
