@@ -50,7 +50,69 @@ function useCollection(name, enabled, sorter) {
   return [data, error];
 }
 
-function App() {
+// Avisa cuando se publicó una versión nueva de la app.
+// Compara el archivo principal que está corriendo con el que figura en el index.html más reciente del servidor.
+function useUpdateAvailable() {
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+
+  useEffect(() => {
+    const running = document.querySelector('script[src*="/static/js/main."]');
+    if (!running) return undefined; // modo desarrollo (npm start): no aplica
+    const runningSrc = running.getAttribute("src") || "";
+    let cancelled = false;
+
+    const check = async () => {
+      try {
+        const res = await fetch(`${process.env.PUBLIC_URL}/index.html?t=${Date.now()}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const html = await res.text();
+        const latest = html.match(/\/static\/js\/main\.[\w]+\.js/);
+        if (latest && !cancelled && !runningSrc.includes(latest[0])) setUpdateAvailable(true);
+      } catch (error) {
+        // Sin conexión: se vuelve a intentar más tarde
+      }
+    };
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") check();
+    };
+
+    check();
+    const interval = setInterval(check, 5 * 60 * 1000);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+
+  return updateAvailable;
+}
+
+function UpdateBanner() {
+  // Se abre la misma página con una dirección distinta para obligar al navegador a bajar la versión nueva
+  const reload = () => {
+    window.location.href = `${window.location.pathname}?v=${Date.now()}`;
+  };
+  return (
+    <div
+      role="status"
+      className="fixed bottom-0 inset-x-0 z-40 bg-pink-700 text-white px-4 pt-3 flex items-center justify-between gap-3 shadow-lg"
+      style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))" }}
+    >
+      <span className="text-sm">Hay una nueva versión de la agenda.</span>
+      <button
+        onClick={reload}
+        className="bg-white text-pink-700 font-semibold px-4 py-2 rounded-md text-sm whitespace-nowrap"
+      >
+        Actualizar
+      </button>
+    </div>
+  );
+}
+
+function AppContent() {
   // === AUTENTICACIÓN ===
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -142,6 +204,16 @@ function App() {
         {activeTab === "consultorios" && <Consultorios consultorios={consultorios} />}
       </main>
     </div>
+  );
+}
+
+function App() {
+  const updateAvailable = useUpdateAvailable();
+  return (
+    <>
+      <AppContent />
+      {updateAvailable && <UpdateBanner />}
+    </>
   );
 }
 
