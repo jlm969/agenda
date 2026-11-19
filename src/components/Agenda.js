@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { collection, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
 import { db } from "../firebase";
 import Modal from "./Modal";
@@ -72,24 +72,129 @@ const toWhatsAppNumber = (raw) => {
   return d.length === 10 ? `549${d}` : null;
 };
 
-// Arma el link de WhatsApp para un turno (o el motivo por el que no se puede)
-const getWhatsApp = (appointment, patients) => {
-  const name = (appointment.patientName || "").trim().toLowerCase();
-  const patient = (patients || []).find((p) => (p.name || "").trim().toLowerCase() === name);
-  if (!patient || !String(patient.phone || "").trim()) return { error: "Sin teléfono guardado" };
+// Busca la ficha del paciente por el nombre que figura en el turno
+const findPatient = (patients, name) => {
+  const key = (name || "").trim().toLowerCase();
+  return (patients || []).find((p) => (p.name || "").trim().toLowerCase() === key) || null;
+};
 
-  const number = toWhatsAppNumber(patient.phone);
-  if (!number) return { error: "Teléfono incompleto: falta el código de área" };
+// Momento exacto (en milisegundos) en que empieza un turno
+const slotTime = (dateKey, time) => new Date(`${dateKey}T${time}:00`).getTime();
 
-  const day = new Date(appointment.date + "T00:00:00").toLocaleDateString("es-AR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
+// "19/11 16:30" (hora de 24 horas)
+const formatDayTime = (ms) => {
+  const d = new Date(ms);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${d.getDate()}/${d.getMonth() + 1} ${hh}:${mm}`;
+};
+
+// El recordatorio se puede enviar en cualquier momento, salvo que el turno ya haya pasado
+const getReminderWindow = (appointment, now) =>
+  slotTime(appointment.date, appointment.time) <= now
+    ? { open: false, reason: "El turno ya pasó: no se puede enviar el recordatorio" }
+    : { open: true };
+
+// --- Mensaje editable ---
+// Se guarda en este navegador; si no hay uno guardado, se usa el mensaje original.
+const TEMPLATE_KEY = "agenda_lh_mensaje_recordatorio";
+
+const DEFAULT_TEMPLATE = `Hola {paciente}, te escribimos de {clinica} por tu turno de {tratamiento}: {dia} a las {hora}.
+
+📍 {lugar}
+{direccion}
+Cómo llegar: {mapa}
+
+¿Nos confirmás que podés asistir? ¡Gracias!`;
+
+// Datos que se pueden insertar en el mensaje: { nombre }
+const PLACEHOLDERS = [
+  { key: "paciente", label: "Paciente" },
+  { key: "tratamiento", label: "Tratamiento" },
+  { key: "dia", label: "Día" },
+  { key: "hora", label: "Hora" },
+  { key: "clinica", label: "Nombre del centro" },
+  { key: "lugar", label: "Lugar" },
+  { key: "direccion", label: "Dirección" },
+  { key: "mapa", label: "Link de Maps" },
+];
+
+const loadTemplate = () => {
+  try {
+    return localStorage.getItem(TEMPLATE_KEY) || DEFAULT_TEMPLATE;
+  } catch (error) {
+    return DEFAULT_TEMPLATE;
+  }
+};
+
+// Dirección completa: calle y número, ciudad y provincia (solo lo que esté cargado)
+const buildAddress = (place) =>
+  [place?.address, place?.city, place?.province]
+    .map((v) => String(v || "").trim())
+    .filter(Boolean)
+    .join(", ");
+
+// Link de Google Maps: el que se haya pegado, o uno armado con la dirección
+const buildMapsUrl = (place) => {
+  const custom = String(place?.mapsUrl || "").trim();
+  if (custom) return custom;
+  const address = buildAddress(place);
+  return address
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${address}, Argentina`)}`
+    : "";
+};
+
+// Reemplaza los {datos} del mensaje. Si una línea solo tiene datos que no están cargados
+// (por ejemplo, la dirección de un consultorio sin dirección), esa línea se omite.
+const buildMessage = (template, appointment, consultorios) => {
+  const consultorioName = (appointment.consultorio || "").trim().toLowerCase();
+  const place = (consultorios || []).find((c) => (c.name || "").trim().toLowerCase() === consultorioName);
+
+  const values = {
+    paciente: appointment.patientName || "",
+    tratamiento: appointment.treatment || "",
+    dia: new Date(appointment.date + "T00:00:00").toLocaleDateString("es-AR", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+    }),
+    hora: appointment.time || "",
+    clinica: CLINIC_NAME,
+    lugar: (place && place.name) || appointment.consultorio || "",
+    direccion: buildAddress(place),
+    mapa: buildMapsUrl(place),
+  };
+
+  const lines = template.split("\n").map((line) => {
+    let hasData = false;
+    let anyFilled = false;
+    const out = line.replace(/\{(\w+)\}/g, (match, key) => {
+      if (!(key in values)) return match; // dato desconocido: se deja tal cual para que se note
+      hasData = true;
+      if (values[key]) anyFilled = true;
+      return values[key];
+    });
+    return hasData && !anyFilled ? null : out;
   });
-  const text =
-    `Hola ${appointment.patientName}, te escribimos de ${CLINIC_NAME} por tu turno de ` +
-    `${appointment.treatment}: ${day} a las ${appointment.time}. ¿Nos confirmás que podés asistir? ¡Gracias!`;
-  return { url: `https://wa.me/${number}?text=${encodeURIComponent(text)}` };
+
+  return lines.filter((l) => l !== null).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+};
+
+// Arma el link de WhatsApp para un turno (o indica qué falta)
+const getWhatsApp = (appointment, patients, template, consultorios) => {
+  const patient = findPatient(patients, appointment.patientName);
+  if (!patient) return { error: "No se encontró la ficha de este paciente en Pacientes" };
+
+  const phone = String(patient.phone || "").trim();
+  if (!phone) return { patient, needsPhone: true, error: "Este paciente no tiene teléfono guardado" };
+
+  const number = toWhatsAppNumber(phone);
+  if (!number) {
+    return { patient, needsPhone: true, error: `El teléfono guardado (${phone}) está incompleto: falta el código de área` };
+  }
+
+  const text = buildMessage(template, appointment, consultorios);
+  return { patient, url: `https://wa.me/${number}?text=${encodeURIComponent(text)}` };
 };
 
 // === HELPERS ===
@@ -131,6 +236,26 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
   const [newTime, setNewTime] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Hora actual, se actualiza cada minuto para que los avisos y horarios no queden desactualizados
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Arrastrar y soltar turnos
+  const [draggingId, setDraggingId] = useState(null);
+  const [dropTarget, setDropTarget] = useState(null);
+
+  // Teléfonos que se están escribiendo desde la ventana del turno (por turno)
+  const [phoneDrafts, setPhoneDrafts] = useState({});
+
+  // Mensaje del recordatorio (editable) y datos de los lugares
+  const [template, setTemplate] = useState(loadTemplate);
+  const [messageModalOpen, setMessageModalOpen] = useState(false);
+  const [templateDraft, setTemplateDraft] = useState("");
+  const templateRef = useRef(null);
+
   const [dailyModalOpen, setDailyModalOpen] = useState(false);
   const [selectedDayForModal, setSelectedDayForModal] = useState(null);
 
@@ -162,8 +287,8 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
   const isSundayChosen = Boolean(newDate) && new Date(newDate + "T00:00:00").getDay() === 0;
   const availableTimes = useMemo(() => {
     if (!isRescheduling || !newDate || isSundayChosen) return [];
-    return TIME_SLOTS.filter((t) => !turnosBySlot.has(`${newDate}|${t}`));
-  }, [isRescheduling, newDate, isSundayChosen, turnosBySlot]);
+    return TIME_SLOTS.filter((t) => !turnosBySlot.has(`${newDate}|${t}`) && slotTime(newDate, t) > now);
+  }, [isRescheduling, newDate, isSundayChosen, turnosBySlot, now]);
 
   const dailyAppointments = useMemo(() => {
     if (!selectedDayForModal) return [];
@@ -173,7 +298,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
       .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
   }, [turnos, selectedDayForModal]);
 
-  const todayKey = toDateKey(new Date());
+  const todayKey = toDateKey(new Date(now));
   const isCurrentWeek = toDateKey(currentWeekStart) === toDateKey(getStartOfWeek(new Date()));
 
   const weekLabel = (() => {
@@ -207,13 +332,72 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
     }
   };
 
-  // Botón de WhatsApp (o el motivo por el que no está disponible)
-  const renderWhatsApp = (appointment) => {
-    const { url, error } = getWhatsApp(appointment, patients);
-    if (error) return <span className="text-xs text-gray-500">{error}</span>;
+  // Guarda en la ficha del paciente el teléfono escrito desde la ventana del turno
+  const savePatientPhone = (appointment, patient) => {
+    const phone = String(phoneDrafts[appointment.id] ?? patient.phone ?? "").trim();
+    if (!toWhatsAppNumber(phone)) {
+      alert("El teléfono no es válido. Escribí el código de área y el número, sin 0 ni 15.");
+      return;
+    }
+    runAction(async () => {
+      await updateDoc(doc(db, "pacientes", patient.id), { phone });
+      setPhoneDrafts((prev) => {
+        const next = { ...prev };
+        delete next[appointment.id];
+        return next;
+      });
+    });
+  };
 
+  // Botón de WhatsApp, o el motivo por el que no está disponible
+  const renderWhatsApp = (appointment) => {
     const live = turnos.find((t) => t.id === appointment.id) || appointment;
     const sentAt = live.reminderSentAt;
+    const sentInfo = sentAt ? (
+      <span className="text-xs text-green-700">Enviado el {formatDayTime(sentAt)}</span>
+    ) : null;
+
+    // Fuera de la ventana de envío (turno pasado o todavía lejano)
+    const reminder = getReminderWindow(appointment, now);
+    if (!reminder.open) {
+      return (
+        <>
+          <span className="text-xs text-gray-500">{reminder.reason}</span>
+          {sentInfo}
+        </>
+      );
+    }
+
+    const { url, error, needsPhone, patient } = getWhatsApp(appointment, patients, template, consultorios);
+
+    // Falta el teléfono: se pide acá mismo y se guarda en la ficha del paciente
+    if (needsPhone) {
+      const draft = phoneDrafts[appointment.id] ?? patient.phone ?? "";
+      return (
+        <div className="w-full">
+          <p className="text-xs text-gray-600 mb-1">{error}</p>
+          <div className="flex gap-2">
+            <input
+              type="tel"
+              inputMode="tel"
+              placeholder="Código de área y número"
+              value={draft}
+              onChange={(e) => setPhoneDrafts((prev) => ({ ...prev, [appointment.id]: e.target.value }))}
+              className="border p-2 rounded flex-1 min-w-0 text-sm"
+            />
+            <button
+              onClick={() => savePatientPhone(appointment, patient)}
+              className="bg-pink-500 text-white px-3 py-2 rounded text-sm hover:bg-pink-600 transition"
+            >
+              Guardar teléfono
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (error) return <span className="text-xs text-gray-500">{error}</span>;
+
     return (
       <>
         <a
@@ -225,19 +409,79 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
         >
           {sentAt ? "Enviar de nuevo" : "Enviar WhatsApp"}
         </a>
-        {sentAt && (
-          <span className="text-xs text-green-700">
-            Enviado el{" "}
-            {new Date(sentAt).toLocaleString("es-AR", {
-              day: "numeric",
-              month: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-          </span>
-        )}
+        {sentInfo}
       </>
     );
+  };
+
+  // === EDITOR DEL MENSAJE ===
+  const openMessageModal = () => {
+    setTemplateDraft(template);
+    setMessageModalOpen(true);
+  };
+  const closeMessageModal = () => setMessageModalOpen(false);
+
+  const saveTemplate = () => {
+    const text = templateDraft.trim();
+    if (!text) {
+      alert("El mensaje no puede quedar vacío.");
+      return;
+    }
+    setTemplate(text);
+    try {
+      localStorage.setItem(TEMPLATE_KEY, text);
+    } catch (error) {
+      alert("No se pudo guardar el mensaje en este navegador. Se va a usar hasta que cierres la app.");
+    }
+    closeMessageModal();
+  };
+
+  // Inserta un dato (ej. {paciente}) donde está el cursor
+  const insertPlaceholder = (key) => {
+    const token = `{${key}}`;
+    const el = templateRef.current;
+    if (!el) {
+      setTemplateDraft((prev) => prev + token);
+      return;
+    }
+    const start = el.selectionStart ?? templateDraft.length;
+    const end = el.selectionEnd ?? templateDraft.length;
+    setTemplateDraft(templateDraft.slice(0, start) + token + templateDraft.slice(end));
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(start + token.length, start + token.length);
+    });
+  };
+
+  // Turno de ejemplo para la vista previa: el próximo confirmado, o uno inventado
+  const sampleAppointment =
+    turnos
+      .filter((t) => t.status === "Confirmado" && slotTime(t.date, t.time) > now)
+      .sort((a, b) => slotTime(a.date, a.time) - slotTime(b.date, b.time))[0] || {
+      patientName: "María Pérez",
+      treatment: "Tratamiento",
+      date: toDateKey(new Date(now + 24 * 60 * 60 * 1000)),
+      time: "10:00",
+      consultorio: (consultorios && consultorios[0] && consultorios[0].name) || "",
+    };
+
+  // === ARRASTRAR Y SOLTAR ===
+  // Un horario sirve como destino si está libre y todavía no pasó
+  const canMoveTo = (dateKey, time) => !turnosBySlot.has(`${dateKey}|${time}`) && slotTime(dateKey, time) > now;
+
+  const handleDropOnSlot = (day, time) => {
+    const appointment = turnos.find((t) => t.id === draggingId);
+    setDraggingId(null);
+    setDropTarget(null);
+    const dateKey = toDateKey(day);
+    if (!appointment || !canMoveTo(dateKey, time)) return;
+
+    const when = day.toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" });
+    if (!window.confirm(`¿Mover el turno de ${appointment.patientName} al ${when} a las ${time}?`)) return;
+
+    runAction(async () => {
+      await updateDoc(doc(db, "turnos", appointment.id), { date: dateKey, time, reminderSentAt: null });
+    });
   };
 
   // === MODALES ===
@@ -394,6 +638,10 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
       alert("No se puede reprogramar a una fecha pasada.");
       return;
     }
+    if (slotTime(newDate, newTime) <= Date.now()) {
+      alert("No se puede reprogramar a un horario que ya pasó.");
+      return;
+    }
     if (turnosBySlot.has(`${newDate}|${newTime}`)) {
       alert("Ese horario ya está ocupado.");
       return;
@@ -522,12 +770,20 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
         </div>
       </div>
 
-      <button
-        onClick={() => handleDayHeaderClick(nextWorkDay)}
-        className="mb-4 w-full sm:w-auto bg-green-600 text-white px-4 py-2 rounded-md text-sm font-semibold hover:bg-green-700 transition-colors"
-      >
-        Recordatorios para {nextWorkDayLabel}
-      </button>
+      <div className="flex flex-wrap gap-2 mb-4">
+        <button
+          onClick={() => handleDayHeaderClick(nextWorkDay)}
+          className="flex-1 sm:flex-none bg-green-600 text-white px-4 py-2 rounded-md text-sm font-semibold hover:bg-green-700 transition-colors"
+        >
+          Recordatorios para {nextWorkDayLabel}
+        </button>
+        <button
+          onClick={openMessageModal}
+          className="flex-1 sm:flex-none bg-white text-pink-700 border border-pink-300 px-4 py-2 rounded-md text-sm font-semibold hover:bg-pink-50 transition-colors"
+        >
+          Editar mensaje
+        </button>
+      </div>
 
       {/* Navegación de semanas */}
       <div className="flex items-center justify-between gap-2 mb-4 bg-white rounded-lg shadow-sm px-3 py-2">
@@ -554,6 +810,10 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
           &rsaquo;
         </button>
       </div>
+
+      <p className="hidden md:block text-xs text-gray-500 mb-2">
+        Con el mouse podés arrastrar un turno confirmado a otro horario libre, del mismo día o de otro día de esta semana.
+      </p>
 
       {/* Grilla semanal */}
       <div className="isolate overflow-auto max-h-[70vh] rounded-lg shadow-sm bg-white">
@@ -593,13 +853,47 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
                   {time}
                 </td>
                 {weekDates.map((day, di) => {
+                  const dateKey = toDateKey(day);
+                  const slotKey = `${dateKey}|${time}`;
                   const appointment = getAppointment(day, time);
                   const style = appointment ? STATUS_STYLES[appointment.status] || STATUS_STYLES.Confirmado : null;
-                  const cellClass = style ? style.cell : "bg-gray-100 hover:bg-pink-50";
+                  const isPastSlot = slotTime(dateKey, time) <= now;
+                  const canDrag = Boolean(appointment) && appointment.status === "Confirmado" && !saving;
+                  const isValidTarget = Boolean(draggingId) && !appointment && !isPastSlot;
+
+                  let cellClass = isPastSlot ? "bg-gray-50 hover:bg-gray-100" : "bg-gray-100 hover:bg-pink-50";
+                  if (style) cellClass = style.cell;
+                  if (isValidTarget) cellClass = "bg-green-50";
+                  if (isValidTarget && dropTarget === slotKey) cellClass = "bg-pink-100 ring-2 ring-inset ring-pink-400";
+                  if (appointment && appointment.id === draggingId) cellClass += " opacity-50";
 
                   return (
                     <td
                       key={di}
+                      draggable={canDrag}
+                      onDragStart={(e) => {
+                        if (!canDrag) return;
+                        e.dataTransfer.setData("text/plain", appointment.id);
+                        e.dataTransfer.effectAllowed = "move";
+                        setDraggingId(appointment.id);
+                      }}
+                      onDragEnd={() => {
+                        setDraggingId(null);
+                        setDropTarget(null);
+                      }}
+                      onDragOver={(e) => {
+                        if (isValidTarget) {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                          if (dropTarget !== slotKey) setDropTarget(slotKey);
+                        } else if (dropTarget !== null) {
+                          setDropTarget(null);
+                        }
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (isValidTarget) handleDropOnSlot(day, time);
+                      }}
                       className={`group h-11 px-2 py-0.5 text-xs text-center border cursor-pointer transition-colors ${cellClass}`}
                       onClick={() => handleSlotClick(day, time)}
                     >
@@ -802,7 +1096,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
           <ul className="max-h-[60vh] overflow-y-auto">
             {dailyAppointments.map((a) => (
               <li key={a.id} className="bg-gray-100 p-3 mb-2 rounded flex justify-between items-center gap-3">
-                <div>
+                <div className="min-w-0 flex-1">
                   <div className="font-bold">{a.patientName}</div>
                   <div className="text-sm">
                     {a.time} &middot; {a.treatment} &middot; {a.consultorio}
@@ -835,6 +1129,88 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
         ) : (
           <p>No hay turnos agendados para este día.</p>
         )}
+      </Modal>
+
+      {/* Modal: editar mensaje de recordatorio y datos del lugar */}
+      <Modal
+        isOpen={messageModalOpen}
+        onClose={closeMessageModal}
+        title="Mensaje de recordatorio"
+        actions={[
+          { label: "Cerrar", onClick: closeMessageModal, className: "bg-gray-300 text-gray-700 hover:bg-gray-400" },
+          {
+            label: "Restaurar original",
+            onClick: () => setTemplateDraft(DEFAULT_TEMPLATE),
+            className: "bg-yellow-400 text-white hover:bg-yellow-500",
+          },
+          { label: "Guardar mensaje", onClick: saveTemplate },
+        ]}
+      >
+        <div className="flex flex-col gap-4">
+          <div>
+            <label htmlFor="mensaje" className="block text-sm font-medium text-gray-700 mb-1">
+              Mensaje
+            </label>
+            <textarea
+              id="mensaje"
+              ref={templateRef}
+              rows={9}
+              value={templateDraft}
+              onChange={(e) => setTemplateDraft(e.target.value)}
+              className="border p-3 rounded w-full text-sm"
+            />
+            <p className="text-xs text-gray-500 mt-1 mb-2">
+              Tocá un dato para insertarlo donde está el cursor. Se reemplaza por el del turno al enviar. Si una línea
+              solo tiene datos que no están cargados (por ejemplo la dirección), esa línea no se envía.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {PLACEHOLDERS.map((ph) => (
+                <button
+                  key={ph.key}
+                  type="button"
+                  onClick={() => insertPlaceholder(ph.key)}
+                  className="px-2 py-1 rounded-full bg-pink-100 text-pink-800 text-xs hover:bg-pink-200 transition"
+                >
+                  {ph.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="block text-sm font-medium text-gray-700 mb-1">Vista previa</p>
+            <div className="whitespace-pre-wrap break-words bg-green-50 border border-green-200 rounded p-3 text-sm">
+              {buildMessage(templateDraft, sampleAppointment, consultorios)}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">Con los datos de un turno real próximo, o de ejemplo si no hay.</p>
+          </div>
+
+          <div>
+            <p className="block text-sm font-medium text-gray-700 mb-1">Dirección de cada lugar</p>
+            <p className="text-xs text-gray-500 mb-2">
+              Se cargan en la pestaña Consultorios: dirección, localidad, provincia y, si querés, un link de Google Maps.
+              El nombre del lugar es el nombre del consultorio.
+            </p>
+            {(!consultorios || consultorios.length === 0) && (
+              <p className="text-sm text-gray-500">No hay consultorios cargados.</p>
+            )}
+            {(consultorios || []).map((c) => {
+              const address = buildAddress(c);
+              const mapsUrl = buildMapsUrl(c);
+              return (
+                <div key={c.id} className="border rounded p-3 mb-2 bg-gray-50 text-sm">
+                  <p className="font-semibold text-pink-800">{c.name}</p>
+                  <p className={address ? "text-gray-700" : "text-gray-500"}>{address || "Sin dirección cargada"}</p>
+                  {mapsUrl && (
+                    <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="text-pink-700 underline">
+                      Probar ubicación en Maps
+                    </a>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </Modal>
 
       {/* Modal confirmar eliminar */}

@@ -1,65 +1,89 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import Modal from './Modal';
 import useCRUDModal from '../hooks/useCRUDModal';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 
-function Consultorios() {
-  const [consultorios, setConsultorios] = useState([]);
-  const [newConsultorio, setNewConsultorio] = useState({ name: "", address: "", city: "", phone: "" });
+const consultoriosRef = collection(db, "consultorios");
+
+const EMPTY_CONSULTORIO = { name: "", address: "", city: "", province: "", mapsUrl: "", phone: "" };
+
+// Dirección completa: calle y número, localidad y provincia (solo lo que esté cargado)
+const buildAddress = (c) =>
+  [c.address, c.city, c.province]
+    .map((v) => String(v || "").trim())
+    .filter(Boolean)
+    .join(", ");
+
+// Link de Google Maps: el que se haya pegado, o uno armado con la dirección
+const buildMapsUrl = (c) => {
+  const custom = String(c.mapsUrl || "").trim();
+  if (custom) return custom;
+  const address = buildAddress(c);
+  return address
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${address}, Argentina`)}`
+    : "";
+};
+
+// Los consultorios llegan desde App.js (ya cargados en tiempo real)
+function Consultorios({ consultorios = [] }) {
+  const [newConsultorio, setNewConsultorio] = useState(EMPTY_CONSULTORIO);
   const [editingConsultorioIndex, setEditingConsultorioIndex] = useState(null);
+  const [saving, setSaving] = useState(false);
   const { isModalOpen, itemToDelete, openModal, closeModal, confirmDelete, cancelDelete } = useCRUDModal();
 
-  const consultoriosRef = collection(db, "consultorios");
-
-  // Cargar consultorios en tiempo real
-  useEffect(() => {
-    const unsubscribe = onSnapshot(consultoriosRef, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setConsultorios(data);
-    });
-
-    return () => unsubscribe(); // Cleanup al desmontar el componente
-  }, [consultoriosRef]);
-
   const openAddModal = () => {
-    setNewConsultorio({ name: "", address: "", city: "", phone: "" });
+    setNewConsultorio(EMPTY_CONSULTORIO);
     setEditingConsultorioIndex(null);
     openModal();
   };
 
   const openEditModal = (index) => {
     setEditingConsultorioIndex(index);
-    setNewConsultorio(consultorios[index]);
+    // Los consultorios viejos pueden no tener provincia ni link: se completan vacíos
+    setNewConsultorio({ ...EMPTY_CONSULTORIO, ...consultorios[index] });
     openModal();
   };
 
   const addOrUpdateConsultorio = async () => {
+    // El id es del documento, no se guarda como un dato más
+    const { id, ...data } = newConsultorio;
     if (editingConsultorioIndex !== null) {
       const consultorio = consultorios[editingConsultorioIndex];
-      const docRef = doc(db, "consultorios", consultorio.id);
-      await updateDoc(docRef, newConsultorio);
+      await updateDoc(doc(db, "consultorios", consultorio.id), data);
     } else {
-      await addDoc(consultoriosRef, newConsultorio);
+      await addDoc(consultoriosRef, data);
     }
     closeModal();
   };
 
   const handleConfirmDelete = async () => {
-    if (itemToDelete !== null) {
+    if (itemToDelete === null) return;
+    try {
       const consultorio = consultorios[itemToDelete];
-      const docRef = doc(db, "consultorios", consultorio.id);
-      await deleteDoc(docRef);
+      await deleteDoc(doc(db, "consultorios", consultorio.id));
       cancelDelete();
+    } catch (error) {
+      console.error("Error al eliminar el consultorio:", error);
+      alert("No se pudo eliminar. Revisá tu conexión e intentá de nuevo.");
     }
   };
 
-  const handleSaveConsultorio = () => {
+  const handleSaveConsultorio = async () => {
     if (newConsultorio.name.trim() === "") {
       alert("El nombre del consultorio es obligatorio.");
       return;
     }
-    addOrUpdateConsultorio();
+    if (saving) return;
+    setSaving(true);
+    try {
+      await addOrUpdateConsultorio();
+    } catch (error) {
+      console.error("Error al guardar el consultorio:", error);
+      alert("No se pudo guardar. Revisá tu conexión e intentá de nuevo.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -83,14 +107,14 @@ function Consultorios() {
         <div className="flex flex-col gap-4">
           <input
             type="text"
-            placeholder="Nombre del consultorio"
+            placeholder="Nombre del consultorio (el lugar, ej. FisioMed)"
             className="border p-3 rounded w-full"
             value={newConsultorio.name}
             onChange={(e) => setNewConsultorio({ ...newConsultorio, name: e.target.value })}
           />
           <input
             type="text"
-            placeholder="Dirección"
+            placeholder="Dirección (calle y número)"
             className="border p-3 rounded w-full"
             value={newConsultorio.address}
             onChange={(e) => setNewConsultorio({ ...newConsultorio, address: e.target.value })}
@@ -102,6 +126,26 @@ function Consultorios() {
             value={newConsultorio.city}
             onChange={(e) => setNewConsultorio({ ...newConsultorio, city: e.target.value })}
           />
+          <input
+            type="text"
+            placeholder="Provincia"
+            className="border p-3 rounded w-full"
+            value={newConsultorio.province}
+            onChange={(e) => setNewConsultorio({ ...newConsultorio, province: e.target.value })}
+          />
+          <div>
+            <input
+              type="url"
+              placeholder="Link de Google Maps (opcional)"
+              className="border p-3 rounded w-full"
+              value={newConsultorio.mapsUrl}
+              onChange={(e) => setNewConsultorio({ ...newConsultorio, mapsUrl: e.target.value })}
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Si lo dejás vacío, el link se arma solo con la dirección. Para uno exacto, en Google Maps buscá el lugar,
+              tocá Compartir y pegá el link acá.
+            </p>
+          </div>
           <input
             type="text"
             placeholder="Teléfono"
@@ -127,38 +171,44 @@ function Consultorios() {
       </Modal>
 
       <ul className="mt-6 space-y-3 max-h-[70vh] overflow-y-auto">
-        {consultorios.map((c, i) => (
-          <li key={i} className="bg-gray-50 p-4 rounded-xl shadow-md border border-gray-200 flex justify-between items-center">
-            <div>
-              <div className="font-bold text-lg text-pink-800">{c.name}</div>
-              <div className="text-sm text-gray-700">
-                {c.address}
-                {c.city && `, ${c.city}`}
+        {consultorios.map((c, i) => {
+          const address = buildAddress(c);
+          const mapsUrl = buildMapsUrl(c);
+          return (
+            <li key={c.id} className="bg-gray-50 p-4 rounded-xl shadow-md border border-gray-200 flex justify-between items-center gap-3">
+              <div className="min-w-0">
+                <div className="font-bold text-lg text-pink-800">{c.name}</div>
+                {address && <div className="text-sm text-gray-700">{address}</div>}
+                {c.phone && <div className="text-sm text-gray-700">{c.phone}</div>}
+                {mapsUrl && (
+                  <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-pink-700 underline">
+                    Ver en Maps
+                  </a>
+                )}
               </div>
-              {c.phone && <div className="text-sm text-gray-700">{c.phone}</div>}
-            </div>
-            <div className="mt-2 flex items-center">
-              <button
-                className="bg-yellow-400 text-white px-4 py-2 rounded text-sm mr-2 hover:bg-yellow-500 transition flex items-center space-x-1"
-                onClick={() => openEditModal(i)}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                </svg>
-                <span>Editar</span>
-              </button>
-              <button
-                className="bg-red-500 text-white px-4 py-2 rounded text-sm hover:bg-red-600 transition flex items-center space-x-1"
-                onClick={() => confirmDelete(i)}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                </svg>
-                <span>Eliminar</span>
-              </button>
-            </div>
-          </li>
-        ))}
+              <div className="mt-2 flex items-center shrink-0">
+                <button
+                  className="bg-yellow-400 text-white px-4 py-2 rounded text-sm mr-2 hover:bg-yellow-500 transition flex items-center space-x-1"
+                  onClick={() => openEditModal(i)}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                  </svg>
+                  <span>Editar</span>
+                </button>
+                <button
+                  className="bg-red-500 text-white px-4 py-2 rounded text-sm hover:bg-red-600 transition flex items-center space-x-1"
+                  onClick={() => confirmDelete(i)}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                  <span>Eliminar</span>
+                </button>
+              </div>
+            </li>
+          );
+        })}
       </ul>
 
       <Modal title="Confirmar Eliminación" isOpen={itemToDelete !== null} onClose={cancelDelete}>
@@ -183,4 +233,3 @@ function Consultorios() {
 }
 
 export default Consultorios;
-
