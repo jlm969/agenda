@@ -4,6 +4,7 @@ import Pacientes from "./components/Pacientes";
 import Agenda from "./components/Agenda";
 import Tratamientos from "./components/Tratamientos";
 import Consultorios from "./components/Consultorios";
+import Dashboard from "./components/Dashboard";
 import Login from "./components/Login";
 import Logout from "./components/Logout";
 import ModalLogin from "./components/ModalLogin";
@@ -16,6 +17,7 @@ const TABS = [
   { id: "patients", label: "Pacientes" },
   { id: "treatments", label: "Tratamientos" },
   { id: "consultorios", label: "Consultorios" },
+  { id: "dashboard", label: "Estadísticas" },
 ];
 
 // Orden alfabético por nombre (para listas y desplegables)
@@ -91,9 +93,19 @@ function useUpdateAvailable() {
 }
 
 function UpdateBanner() {
-  // Se abre la misma página con una dirección distinta para obligar al navegador a bajar la versión nueva
-  const reload = () => {
-    window.location.href = `${window.location.pathname}?v=${Date.now()}`;
+  // Primero se renueva la copia guardada de la página (la que abre el ícono de inicio) y después se recarga.
+  // Si no, al salir y volver a entrar el navegador abriría otra vez la versión vieja.
+  const reload = async () => {
+    const page = window.location.pathname;
+    try {
+      await Promise.all([
+        fetch(page, { cache: "reload" }),
+        fetch(`${process.env.PUBLIC_URL}/index.html`, { cache: "reload" }),
+      ]);
+    } catch (error) {
+      // Sin conexión: se recarga igual
+    }
+    window.location.replace(page);
   };
   return (
     <div
@@ -174,7 +186,7 @@ function AppContent() {
           </div>
         </div>
 
-        <div className="flex justify-center gap-2 overflow-x-auto">
+        <div className="flex gap-2 overflow-x-auto sm:justify-center">
           {TABS.map((tab) => (
             <button
               key={tab.id}
@@ -202,6 +214,7 @@ function AppContent() {
         {activeTab === "patients" && <Pacientes patients={patients} />}
         {activeTab === "treatments" && <Tratamientos treatments={treatments} />}
         {activeTab === "consultorios" && <Consultorios consultorios={consultorios} />}
+        {activeTab === "dashboard" && <Dashboard turnos={turnos} />}
       </main>
     </div>
   );
