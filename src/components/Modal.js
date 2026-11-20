@@ -27,18 +27,20 @@ const Modal = ({ isOpen, onClose, title, children, actions }) => {
         <div className="my-5">
           {children}
         </div>
-        {/* Los botones pasan a la fila siguiente cuando no entran */}
-        <div className="flex flex-wrap justify-end gap-2 pt-3 border-t-2 border-pink-100">
-          {actions && actions.map((action, index) => (
-            <button
-              key={index}
-              onClick={action.onClick}
-              className={`px-3 sm:px-4 py-2 rounded-lg text-sm sm:text-base font-semibold transition-colors ${action.className || 'bg-pink-500 text-white hover:bg-pink-600'}`}
-            >
-              {action.label}
-            </button>
-          ))}
-        </div>
+        {/* Los botones pasan a la fila siguiente cuando no entran. Si el modal trae sus propios botones, no se dibuja la barra vacía. */}
+        {actions && actions.length > 0 && (
+          <div className="flex flex-wrap justify-end gap-2 pt-3 border-t-2 border-pink-100">
+            {actions.map((action, index) => (
+              <button
+                key={index}
+                onClick={action.onClick}
+                className={`px-3 sm:px-4 py-2 rounded-lg text-sm sm:text-base font-semibold transition-colors ${action.className || 'bg-pink-500 text-white hover:bg-pink-600'}`}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
