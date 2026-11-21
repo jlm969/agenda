@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { collection, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
+import { AiOutlineSetting } from "react-icons/ai";
 import { db } from "../firebase";
 import Modal from "./Modal";
 import SearchableDropdown from "./SearchableDropdown";
@@ -117,6 +118,12 @@ const PLACEHOLDERS = [
   { key: "lugar", label: "Lugar" },
   { key: "direccion", label: "Dirección" },
   { key: "mapa", label: "Link de Maps" },
+];
+
+// Secciones de la ventana de configuración (para sumar más en el futuro)
+const SETTINGS_TABS = [
+  { id: "message", label: "Mensaje" },
+  { id: "places", label: "Lugares" },
 ];
 
 const loadTemplate = () => {
@@ -252,7 +259,8 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
 
   // Mensaje del recordatorio (editable) y datos de los lugares
   const [template, setTemplate] = useState(loadTemplate);
-  const [messageModalOpen, setMessageModalOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState("message");
   const [templateDraft, setTemplateDraft] = useState("");
   const templateRef = useRef(null);
 
@@ -415,11 +423,12 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
   };
 
   // === EDITOR DEL MENSAJE ===
-  const openMessageModal = () => {
+  const openSettings = () => {
     setTemplateDraft(template);
-    setMessageModalOpen(true);
+    setSettingsTab("message");
+    setSettingsOpen(true);
   };
-  const closeMessageModal = () => setMessageModalOpen(false);
+  const closeSettings = () => setSettingsOpen(false);
 
   const saveTemplate = () => {
     const text = templateDraft.trim();
@@ -433,7 +442,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
     } catch (error) {
       alert("No se pudo guardar el mensaje en este navegador. Se va a usar hasta que cierres la app.");
     }
-    closeMessageModal();
+    closeSettings();
   };
 
   // Inserta un dato (ej. {paciente}) donde está el cursor
@@ -757,33 +766,35 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
 
   return (
     <div>
-      {/* Encabezado y referencias de color */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+      {/* Encabezado */}
+      <div className="flex items-center justify-between gap-3 mb-2">
         <h2 className="text-2xl font-semibold text-pink-600">Agenda de turnos</h2>
-        <div className="flex flex-wrap gap-3 text-xs text-gray-600">
-          {Object.entries(STATUS_STYLES).map(([status, style]) => (
-            <span key={status} className="flex items-center gap-1">
-              <span className={`inline-block w-3 h-3 rounded ${style.chip}`} />
-              {status}
-            </span>
-          ))}
-        </div>
+        <button
+          onClick={openSettings}
+          aria-label="Configuración"
+          title="Configuración"
+          className="p-2 rounded-full text-pink-700 hover:bg-pink-100 transition-colors"
+        >
+          <AiOutlineSetting className="h-6 w-6" />
+        </button>
       </div>
 
-      <div className="flex flex-wrap gap-2 mb-4">
-        <button
-          onClick={() => handleDayHeaderClick(nextWorkDay)}
-          className="flex-1 sm:flex-none bg-green-600 text-white px-4 py-2 rounded-md text-sm font-semibold hover:bg-green-700 transition-colors"
-        >
-          Recordatorios para {nextWorkDayLabel}
-        </button>
-        <button
-          onClick={openMessageModal}
-          className="flex-1 sm:flex-none bg-white text-pink-700 border border-pink-300 px-4 py-2 rounded-md text-sm font-semibold hover:bg-pink-50 transition-colors"
-        >
-          Editar mensaje
-        </button>
+      {/* Referencias de color */}
+      <div className="flex flex-wrap gap-3 text-xs text-gray-600 mb-4">
+        {Object.entries(STATUS_STYLES).map(([status, style]) => (
+          <span key={status} className="flex items-center gap-1">
+            <span className={`inline-block w-3 h-3 rounded ${style.chip}`} />
+            {status}
+          </span>
+        ))}
       </div>
+
+      <button
+        onClick={() => handleDayHeaderClick(nextWorkDay)}
+        className="mb-4 w-full sm:w-auto bg-green-600 text-white px-4 py-2 rounded-md text-sm font-semibold hover:bg-green-700 transition-colors"
+      >
+        Recordatorios para {nextWorkDayLabel}
+      </button>
 
       {/* Navegación de semanas */}
       <div className="flex items-center justify-between gap-2 mb-4 bg-white rounded-lg shadow-sm px-3 py-2">
@@ -1131,62 +1142,85 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
         )}
       </Modal>
 
-      {/* Modal: editar mensaje de recordatorio y datos del lugar */}
+      {/* Modal: configuración */}
       <Modal
-        isOpen={messageModalOpen}
-        onClose={closeMessageModal}
-        title="Mensaje de recordatorio"
-        actions={[
-          { label: "Cerrar", onClick: closeMessageModal, className: "bg-gray-300 text-gray-700 hover:bg-gray-400" },
-          {
-            label: "Restaurar original",
-            onClick: () => setTemplateDraft(DEFAULT_TEMPLATE),
-            className: "bg-yellow-400 text-white hover:bg-yellow-500",
-          },
-          { label: "Guardar mensaje", onClick: saveTemplate },
-        ]}
+        isOpen={settingsOpen}
+        onClose={closeSettings}
+        title="Configuración"
+        actions={
+          settingsTab === "message"
+            ? [
+                { label: "Cerrar", onClick: closeSettings, className: "bg-gray-300 text-gray-700 hover:bg-gray-400" },
+                {
+                  label: "Restaurar original",
+                  onClick: () => setTemplateDraft(DEFAULT_TEMPLATE),
+                  className: "bg-yellow-400 text-white hover:bg-yellow-500",
+                },
+                { label: "Guardar mensaje", onClick: saveTemplate },
+              ]
+            : [{ label: "Cerrar", onClick: closeSettings, className: "bg-gray-300 text-gray-700 hover:bg-gray-400" }]
+        }
       >
-        <div className="flex flex-col gap-4">
-          <div>
-            <label htmlFor="mensaje" className="block text-sm font-medium text-gray-700 mb-1">
-              Mensaje
-            </label>
-            <textarea
-              id="mensaje"
-              ref={templateRef}
-              rows={9}
-              value={templateDraft}
-              onChange={(e) => setTemplateDraft(e.target.value)}
-              className="border p-3 rounded w-full text-sm"
-            />
-            <p className="text-xs text-gray-500 mt-1 mb-2">
-              Tocá un dato para insertarlo donde está el cursor. Se reemplaza por el del turno al enviar. Si una línea
-              solo tiene datos que no están cargados (por ejemplo la dirección), esa línea no se envía.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {PLACEHOLDERS.map((ph) => (
-                <button
-                  key={ph.key}
-                  type="button"
-                  onClick={() => insertPlaceholder(ph.key)}
-                  className="px-2 py-1 rounded-full bg-pink-100 text-pink-800 text-xs hover:bg-pink-200 transition"
-                >
-                  {ph.label}
-                </button>
-              ))}
+        <div role="tablist" className="flex bg-pink-50 rounded-lg p-1 gap-1 mb-4">
+          {SETTINGS_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              role="tab"
+              aria-selected={settingsTab === tab.id}
+              onClick={() => setSettingsTab(tab.id)}
+              className={`flex-1 px-2 py-1.5 rounded-md text-sm transition-colors ${
+                settingsTab === tab.id ? "bg-white shadow text-pink-700 font-semibold" : "text-gray-600"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {settingsTab === "message" && (
+          <div className="flex flex-col gap-4">
+            <div>
+              <label htmlFor="mensaje" className="block text-sm font-medium text-gray-700 mb-1">
+                Mensaje de recordatorio
+              </label>
+              <textarea
+                id="mensaje"
+                ref={templateRef}
+                rows={8}
+                value={templateDraft}
+                onChange={(e) => setTemplateDraft(e.target.value)}
+                className="border p-3 rounded w-full text-sm"
+              />
+              <p className="text-xs text-gray-500 mt-1 mb-2">
+                Tocá un dato para insertarlo donde está el cursor. Se reemplaza por el del turno al enviar. Si una línea
+                solo tiene datos que no están cargados (por ejemplo la dirección), esa línea no se envía.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {PLACEHOLDERS.map((ph) => (
+                  <button
+                    key={ph.key}
+                    type="button"
+                    onClick={() => insertPlaceholder(ph.key)}
+                    className="px-2 py-1 rounded-full bg-pink-100 text-pink-800 text-xs hover:bg-pink-200 transition"
+                  >
+                    {ph.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="block text-sm font-medium text-gray-700 mb-1">Vista previa</p>
+              <div className="whitespace-pre-wrap break-words bg-green-50 border border-green-200 rounded p-3 text-sm">
+                {buildMessage(templateDraft, sampleAppointment, consultorios)}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Con los datos de un turno real próximo, o de ejemplo si no hay.</p>
             </div>
           </div>
+        )}
 
+        {settingsTab === "places" && (
           <div>
-            <p className="block text-sm font-medium text-gray-700 mb-1">Vista previa</p>
-            <div className="whitespace-pre-wrap break-words bg-green-50 border border-green-200 rounded p-3 text-sm">
-              {buildMessage(templateDraft, sampleAppointment, consultorios)}
-            </div>
-            <p className="text-xs text-gray-500 mt-1">Con los datos de un turno real próximo, o de ejemplo si no hay.</p>
-          </div>
-
-          <div>
-            <p className="block text-sm font-medium text-gray-700 mb-1">Dirección de cada lugar</p>
             <p className="text-xs text-gray-500 mb-2">
               Se cargan en la pestaña Consultorios: dirección, localidad, provincia y, si querés, un link de Google Maps.
               El nombre del lugar es el nombre del consultorio.
@@ -1210,7 +1244,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
               );
             })}
           </div>
-        </div>
+        )}
       </Modal>
 
       {/* Modal confirmar eliminar */}

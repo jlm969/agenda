@@ -1,4 +1,7 @@
 import { useMemo, useState } from "react";
+import { writeBatch, doc } from "firebase/firestore";
+import { db } from "../firebase";
+import Modal from "./Modal";
 
 // Un tratamiento se cuenta como "realizado" cuando el turno está marcado como Finalizado
 const DONE = "Finalizado";
@@ -128,6 +131,11 @@ const Dashboard = ({ turnos = [] }) => {
   const [treatmentFilter, setTreatmentFilter] = useState(""); // nombre normalizado
   const [view, setView] = useState("treatments");
 
+  // Finalizar turnos pasados: ventana de revisión
+  const [finalizeOpen, setFinalizeOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [saving, setSaving] = useState(false);
+
   const patientNames = useMemo(
     () =>
       [...new Set(turnos.map((t) => String(t.patientName || "").replace(/\s+/g, " ").trim()).filter(Boolean))].sort(
@@ -184,7 +192,9 @@ const Dashboard = ({ turnos = [] }) => {
     const now = Date.now();
     const done = filtered.filter((t) => t.status === DONE);
     const canceled = filtered.filter((t) => t.status === CANCELED);
-    const unfinished = filtered.filter((t) => t.status === CONFIRMED && t.date && slotTime(t.date, t.time) <= now);
+    const unfinished = filtered
+      .filter((t) => t.status === CONFIRMED && t.date && slotTime(t.date, t.time) <= now)
+      .sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.time || "").localeCompare(a.time || ""));
 
     const byTreatment = [...countBy(done, treatmentKey).entries()]
       .map(([key, count]) => ({ key, count, label: key === NO_TREATMENT ? "Sin tratamiento" : treatmentLabels.get(key) || key }))
@@ -246,6 +256,47 @@ const Dashboard = ({ turnos = [] }) => {
   const pickPatient = (name) => {
     setPatientQuery(name);
     setView("history");
+  };
+
+  // Turnos que ya pasaron y siguen confirmados: se revisan y se finalizan juntos
+  const openFinalize = () => {
+    setSelectedIds(new Set(stats.unfinished.map((t) => t.id)));
+    setFinalizeOpen(true);
+  };
+  const toggleId = (id) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleAll = () =>
+    setSelectedIds((prev) =>
+      prev.size === stats.unfinished.length ? new Set() : new Set(stats.unfinished.map((t) => t.id))
+    );
+  const toFinalize = stats.unfinished.filter((t) => selectedIds.has(t.id));
+
+  const finalizeSelected = async () => {
+    if (saving) return;
+    if (toFinalize.length === 0) {
+      alert("Elegí al menos un turno.");
+      return;
+    }
+    setSaving(true);
+    try {
+      // Firestore admite hasta 500 cambios por tanda: se hacen de a 400
+      for (let i = 0; i < toFinalize.length; i += 400) {
+        const batch = writeBatch(db);
+        toFinalize.slice(i, i + 400).forEach((t) => batch.update(doc(db, "turnos", t.id), { status: DONE }));
+        await batch.commit();
+      }
+      setFinalizeOpen(false);
+    } catch (error) {
+      console.error("Error al finalizar los turnos:", error);
+      alert("No se pudieron finalizar todos los turnos. Revisá tu conexión e intentá de nuevo.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const doneTotal = stats.done.length;
@@ -388,11 +439,23 @@ const Dashboard = ({ turnos = [] }) => {
               </div>
             </div>
             {unfinishedCount > 0 && (
-              <p data-stat="unfinished" data-count={unfinishedCount} className="mt-3 text-xs bg-yellow-50 text-yellow-800 rounded px-2 py-1">
-                {unfinishedCount === 1
-                  ? "1 turno ya pasó y sigue confirmado: no se cuenta como realizado."
-                  : `${unfinishedCount} turnos ya pasaron y siguen confirmados: no se cuentan como realizados.`}
-              </p>
+              <div
+                data-stat="unfinished"
+                data-count={unfinishedCount}
+                className="mt-3 bg-yellow-50 text-yellow-800 rounded px-3 py-2 flex flex-wrap items-center justify-between gap-2"
+              >
+                <p className="text-xs flex-1 min-w-[200px]">
+                  {unfinishedCount === 1
+                    ? "1 turno ya pasó y sigue confirmado: no se cuenta como realizado."
+                    : `${unfinishedCount} turnos ya pasaron y siguen confirmados: no se cuentan como realizados.`}
+                </p>
+                <button
+                  onClick={openFinalize}
+                  className="bg-yellow-500 text-white text-xs font-semibold px-3 py-1.5 rounded hover:bg-yellow-600 whitespace-nowrap"
+                >
+                  Revisar y finalizar
+                </button>
+              </div>
             )}
           </div>
 
@@ -478,6 +541,54 @@ const Dashboard = ({ turnos = [] }) => {
           )}
         </>
       )}
+
+      {/* Revisión antes de finalizar los turnos pasados */}
+      <Modal
+        isOpen={finalizeOpen}
+        onClose={() => setFinalizeOpen(false)}
+        title="Finalizar turnos pasados"
+        actions={[
+          { label: "Cancelar", onClick: () => setFinalizeOpen(false), className: "bg-gray-300 text-gray-700 hover:bg-gray-400" },
+          {
+            label: saving ? "Guardando..." : `Finalizar (${toFinalize.length})`,
+            onClick: finalizeSelected,
+            className: "bg-green-500 text-white hover:bg-green-600",
+          },
+        ]}
+      >
+        <p className="text-sm text-gray-700">
+          Estos turnos ya pasaron y siguen confirmados. Al finalizarlos se cuentan como tratamientos realizados.
+          Desmarcá los que no se hicieron (por ejemplo, si el paciente no vino).
+        </p>
+        {hasFilters && (
+          <p className="text-xs text-gray-500 mt-1">Solo se muestran los turnos que cumplen los filtros actuales.</p>
+        )}
+        <button type="button" onClick={toggleAll} className="mt-3 text-xs text-pink-700 underline">
+          {selectedIds.size === stats.unfinished.length ? "Desmarcar todos" : "Marcar todos"}
+        </button>
+        <ul className="mt-1 max-h-72 overflow-y-auto divide-y divide-gray-100">
+          {stats.unfinished.map((t) => (
+            <li key={t.id}>
+              <label className="flex items-start gap-3 py-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(t.id)}
+                  onChange={() => toggleId(t.id)}
+                  className="mt-1 h-4 w-4 shrink-0"
+                />
+                <span className="min-w-0 text-sm">
+                  <span className="block font-medium text-gray-800 truncate">
+                    {t.patientName} · {t.treatment}
+                  </span>
+                  <span className="block text-xs text-gray-500 truncate">
+                    {formatDate(t.date)} {t.time} · {t.consultorio}
+                  </span>
+                </span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </Modal>
     </div>
   );
 };
