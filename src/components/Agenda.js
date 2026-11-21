@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { collection, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
+import { AiOutlineSetting } from "react-icons/ai";
 import { db } from "../firebase";
 import Modal from "./Modal";
 import SearchableDropdown from "./SearchableDropdown";
@@ -20,12 +21,200 @@ const TIME_SLOTS = (() => {
 })();
 
 const STATUS_STYLES = {
-  Confirmado: { cell: "bg-pink-200 text-pink-900 hover:bg-pink-300", chip: "bg-pink-200 text-pink-900" },
-  Finalizado: { cell: "bg-green-200 text-green-900 hover:bg-green-300", chip: "bg-green-200 text-green-900" },
-  Cancelado: { cell: "bg-red-300 text-red-950 font-semibold hover:bg-red-400", chip: "bg-red-300 text-red-950" },
+  Confirmado: {
+    cell: "bg-pink-50 text-pink-900 border-l-4 border-l-pink-500 hover:bg-pink-100",
+    chip: "bg-pink-100 text-pink-800",
+    dot: "bg-pink-500",
+  },
+  Finalizado: {
+    cell: "bg-green-50 text-green-900 border-l-4 border-l-green-500 hover:bg-green-100",
+    chip: "bg-green-100 text-green-800",
+    dot: "bg-green-500",
+  },
+  Cancelado: {
+    cell: "bg-red-50 text-red-900 border-l-4 border-l-red-500 hover:bg-red-100",
+    chip: "bg-red-100 text-red-800",
+    dot: "bg-red-500",
+  },
 };
 
 const turnosRef = collection(db, "turnos");
+
+// === WHATSAPP ===
+const CLINIC_NAME = "Liset Herzog - Medicina Estética";
+// Código de área del consultorio, sin 0 ni 15 (ej. "3464"). Se usa solo si el teléfono
+// guardado no trae el código de área. Dejar vacío ("") si todos los teléfonos lo traen.
+const DEFAULT_AREA_CODE = "";
+
+// Convierte un teléfono argentino escrito de cualquier forma al formato que pide WhatsApp
+// (549 + código de área + número, sin 0 ni 15). Devuelve null si no se puede armar.
+const toWhatsAppNumber = (raw) => {
+  let d = String(raw || "").replace(/\D/g, "");
+  if (!d) return null;
+  if (d.startsWith("00")) d = d.slice(2);
+
+  if (d.startsWith("54")) {
+    d = d.slice(2);
+    if (d.startsWith("9")) d = d.slice(1);
+  } else if (d.startsWith("0")) {
+    d = d.slice(1);
+  } else if (d.length === 11 && d.startsWith("9")) {
+    d = d.slice(1);
+  } else if (d.length > 10) {
+    return d; // otro país: se asume que ya trae el código internacional
+  }
+
+  // Número local sin código de área: se completa con el del consultorio
+  if (d.length < 10 && DEFAULT_AREA_CODE) {
+    const a = DEFAULT_AREA_CODE.length;
+    if (d.length === 10 - a) d = DEFAULT_AREA_CODE + d;
+    else if (d.startsWith("15") && d.length === 12 - a) d = DEFAULT_AREA_CODE + d.slice(2);
+  }
+
+  // Con el 15 de celular (12 dígitos): se quita
+  if (d.length === 12) {
+    const areaLengths = d.startsWith("11") ? [2] : [3, 4];
+    for (const a of areaLengths) {
+      if (d.slice(a, a + 2) === "15") {
+        d = d.slice(0, a) + d.slice(a + 2);
+        break;
+      }
+    }
+  }
+
+  return d.length === 10 ? `549${d}` : null;
+};
+
+// Busca la ficha del paciente por el nombre que figura en el turno
+const findPatient = (patients, name) => {
+  const key = (name || "").trim().toLowerCase();
+  return (patients || []).find((p) => (p.name || "").trim().toLowerCase() === key) || null;
+};
+
+// Momento exacto (en milisegundos) en que empieza un turno
+const slotTime = (dateKey, time) => new Date(`${dateKey}T${time}:00`).getTime();
+
+// "19/11 16:30" (hora de 24 horas)
+const formatDayTime = (ms) => {
+  const d = new Date(ms);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${d.getDate()}/${d.getMonth() + 1} ${hh}:${mm}`;
+};
+
+// El recordatorio se puede enviar en cualquier momento, salvo que el turno ya haya pasado
+const getReminderWindow = (appointment, now) =>
+  slotTime(appointment.date, appointment.time) <= now
+    ? { open: false, reason: "El turno ya pasó: no se puede enviar el recordatorio" }
+    : { open: true };
+
+// --- Mensaje editable ---
+// Se guarda en este navegador; si no hay uno guardado, se usa el mensaje original.
+const TEMPLATE_KEY = "agenda_lh_mensaje_recordatorio";
+
+const DEFAULT_TEMPLATE = `Hola {paciente}, te escribimos de {clinica} por tu turno de {tratamiento}: {dia} a las {hora}.
+
+📍 {lugar}
+{direccion}
+Cómo llegar: {mapa}
+
+¿Nos confirmás que podés asistir? ¡Gracias!`;
+
+// Datos que se pueden insertar en el mensaje: { nombre }
+const PLACEHOLDERS = [
+  { key: "paciente", label: "Paciente" },
+  { key: "tratamiento", label: "Tratamiento" },
+  { key: "dia", label: "Día" },
+  { key: "hora", label: "Hora" },
+  { key: "clinica", label: "Nombre del centro" },
+  { key: "lugar", label: "Lugar" },
+  { key: "direccion", label: "Dirección" },
+  { key: "mapa", label: "Link de Maps" },
+];
+
+// Secciones de la ventana de configuración (para sumar más en el futuro)
+const SETTINGS_TABS = [
+  { id: "message", label: "Mensaje" },
+  { id: "places", label: "Lugares" },
+];
+
+const loadTemplate = () => {
+  try {
+    return localStorage.getItem(TEMPLATE_KEY) || DEFAULT_TEMPLATE;
+  } catch (error) {
+    return DEFAULT_TEMPLATE;
+  }
+};
+
+// Dirección completa: calle y número, ciudad y provincia (solo lo que esté cargado)
+const buildAddress = (place) =>
+  [place?.address, place?.city, place?.province]
+    .map((v) => String(v || "").trim())
+    .filter(Boolean)
+    .join(", ");
+
+// Link de Google Maps: el que se haya pegado, o uno armado con la dirección
+const buildMapsUrl = (place) => {
+  const custom = String(place?.mapsUrl || "").trim();
+  if (custom) return custom;
+  const address = buildAddress(place);
+  return address
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${address}, Argentina`)}`
+    : "";
+};
+
+// Reemplaza los {datos} del mensaje. Si una línea solo tiene datos que no están cargados
+// (por ejemplo, la dirección de un consultorio sin dirección), esa línea se omite.
+const buildMessage = (template, appointment, consultorios) => {
+  const consultorioName = (appointment.consultorio || "").trim().toLowerCase();
+  const place = (consultorios || []).find((c) => (c.name || "").trim().toLowerCase() === consultorioName);
+
+  const values = {
+    paciente: appointment.patientName || "",
+    tratamiento: appointment.treatment || "",
+    dia: new Date(appointment.date + "T00:00:00").toLocaleDateString("es-AR", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+    }),
+    hora: appointment.time || "",
+    clinica: CLINIC_NAME,
+    lugar: (place && place.name) || appointment.consultorio || "",
+    direccion: buildAddress(place),
+    mapa: buildMapsUrl(place),
+  };
+
+  const lines = template.split("\n").map((line) => {
+    let hasData = false;
+    let anyFilled = false;
+    const out = line.replace(/\{(\w+)\}/g, (match, key) => {
+      if (!(key in values)) return match; // dato desconocido: se deja tal cual para que se note
+      hasData = true;
+      if (values[key]) anyFilled = true;
+      return values[key];
+    });
+    return hasData && !anyFilled ? null : out;
+  });
+
+  return lines.filter((l) => l !== null).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+};
+
+// Arma el link de WhatsApp para un turno (o indica qué falta)
+const getWhatsApp = (appointment, patients, template, consultorios) => {
+  const patient = findPatient(patients, appointment.patientName);
+  if (!patient) return { error: "No se encontró la ficha de este paciente en Pacientes" };
+
+  const phone = String(patient.phone || "").trim();
+  if (!phone) return { patient, needsPhone: true, error: "Este paciente no tiene teléfono guardado" };
+
+  const number = toWhatsAppNumber(phone);
+  if (!number) {
+    return { patient, needsPhone: true, error: `El teléfono guardado (${phone}) está incompleto: falta el código de área` };
+  }
+
+  const text = buildMessage(template, appointment, consultorios);
+  return { patient, url: `https://wa.me/${number}?text=${encodeURIComponent(text)}` };
+};
 
 // === HELPERS ===
 // Fecha local en formato YYYY-MM-DD (sin pasar por UTC)
@@ -61,7 +250,31 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
   const [cancelReason, setCancelReason] = useState("");
   const [isReassigning, setIsReassigning] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [isRescheduling, setIsRescheduling] = useState(false);
+  const [newDate, setNewDate] = useState("");
+  const [newTime, setNewTime] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Hora actual, se actualiza cada minuto para que los avisos y horarios no queden desactualizados
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Arrastrar y soltar turnos
+  const [draggingId, setDraggingId] = useState(null);
+  const [dropTarget, setDropTarget] = useState(null);
+
+  // Teléfonos que se están escribiendo desde la ventana del turno (por turno)
+  const [phoneDrafts, setPhoneDrafts] = useState({});
+
+  // Mensaje del recordatorio (editable) y datos de los lugares
+  const [template, setTemplate] = useState(loadTemplate);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState("message");
+  const [templateDraft, setTemplateDraft] = useState("");
+  const templateRef = useRef(null);
 
   const [dailyModalOpen, setDailyModalOpen] = useState(false);
   const [selectedDayForModal, setSelectedDayForModal] = useState(null);
@@ -90,6 +303,13 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
     return map;
   }, [turnos]);
 
+  // Horarios libres del día elegido para reprogramar (la agenda no atiende los domingos)
+  const isSundayChosen = Boolean(newDate) && new Date(newDate + "T00:00:00").getDay() === 0;
+  const availableTimes = useMemo(() => {
+    if (!isRescheduling || !newDate || isSundayChosen) return [];
+    return TIME_SLOTS.filter((t) => !turnosBySlot.has(`${newDate}|${t}`) && slotTime(newDate, t) > now);
+  }, [isRescheduling, newDate, isSundayChosen, turnosBySlot, now]);
+
   const dailyAppointments = useMemo(() => {
     if (!selectedDayForModal) return [];
     const key = toDateKey(selectedDayForModal);
@@ -98,7 +318,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
       .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
   }, [turnos, selectedDayForModal]);
 
-  const todayKey = toDateKey(new Date());
+  const todayKey = toDateKey(new Date(now));
   const isCurrentWeek = toDateKey(currentWeekStart) === toDateKey(getStartOfWeek(new Date()));
 
   const weekLabel = (() => {
@@ -113,6 +333,178 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
 
   const getAppointment = (day, time) => turnosBySlot.get(`${toDateKey(day)}|${time}`);
 
+  // Próximo día de atención (el sábado, el lunes; si no, mañana)
+  const daysToNextWorkDay = new Date().getDay() === 6 ? 2 : 1;
+  const nextWorkDay = (() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + daysToNextWorkDay);
+    return d;
+  })();
+  const nextWorkDayLabel = daysToNextWorkDay === 1 ? "mañana" : "el lunes";
+
+  // Deja registrado que se abrió WhatsApp para avisar al paciente
+  const markReminderSent = async (appointment) => {
+    try {
+      await updateDoc(doc(db, "turnos", appointment.id), { reminderSentAt: Date.now() });
+    } catch (error) {
+      console.error("No se pudo registrar el aviso:", error);
+    }
+  };
+
+  // Guarda en la ficha del paciente el teléfono escrito desde la ventana del turno
+  const savePatientPhone = (appointment, patient) => {
+    const phone = String(phoneDrafts[appointment.id] ?? patient.phone ?? "").trim();
+    if (!toWhatsAppNumber(phone)) {
+      alert("El teléfono no es válido. Escribí el código de área y el número, sin 0 ni 15.");
+      return;
+    }
+    runAction(async () => {
+      await updateDoc(doc(db, "pacientes", patient.id), { phone });
+      setPhoneDrafts((prev) => {
+        const next = { ...prev };
+        delete next[appointment.id];
+        return next;
+      });
+    });
+  };
+
+  // Botón de WhatsApp, o el motivo por el que no está disponible
+  const renderWhatsApp = (appointment) => {
+    const live = turnos.find((t) => t.id === appointment.id) || appointment;
+    const sentAt = live.reminderSentAt;
+    const sentInfo = sentAt ? (
+      <span className="text-xs text-green-700">Enviado el {formatDayTime(sentAt)}</span>
+    ) : null;
+
+    // Fuera de la ventana de envío (turno pasado o todavía lejano)
+    const reminder = getReminderWindow(appointment, now);
+    if (!reminder.open) {
+      return (
+        <>
+          <span className="text-xs text-gray-500">{reminder.reason}</span>
+          {sentInfo}
+        </>
+      );
+    }
+
+    const { url, error, needsPhone, patient } = getWhatsApp(appointment, patients, template, consultorios);
+
+    // Falta el teléfono: se pide acá mismo y se guarda en la ficha del paciente
+    if (needsPhone) {
+      const draft = phoneDrafts[appointment.id] ?? patient.phone ?? "";
+      return (
+        <div className="w-full">
+          <p className="text-xs text-gray-600 mb-1">{error}</p>
+          <div className="flex gap-2">
+            <input
+              type="tel"
+              inputMode="tel"
+              placeholder="Código de área y número"
+              value={draft}
+              onChange={(e) => setPhoneDrafts((prev) => ({ ...prev, [appointment.id]: e.target.value }))}
+              className="border p-2 rounded flex-1 min-w-0 text-sm"
+            />
+            <button
+              onClick={() => savePatientPhone(appointment, patient)}
+              className="bg-pink-500 text-white px-3 py-2 rounded text-sm hover:bg-pink-600 transition"
+            >
+              Guardar teléfono
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (error) return <span className="text-xs text-gray-500">{error}</span>;
+
+    return (
+      <>
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => markReminderSent(appointment)}
+          className="inline-block bg-green-600 text-white px-3 py-2 rounded text-sm hover:bg-green-700 transition"
+        >
+          {sentAt ? "Enviar de nuevo" : "Enviar WhatsApp"}
+        </a>
+        {sentInfo}
+      </>
+    );
+  };
+
+  // === EDITOR DEL MENSAJE ===
+  const openSettings = () => {
+    setTemplateDraft(template);
+    setSettingsTab("message");
+    setSettingsOpen(true);
+  };
+  const closeSettings = () => setSettingsOpen(false);
+
+  const saveTemplate = () => {
+    const text = templateDraft.trim();
+    if (!text) {
+      alert("El mensaje no puede quedar vacío.");
+      return;
+    }
+    setTemplate(text);
+    try {
+      localStorage.setItem(TEMPLATE_KEY, text);
+    } catch (error) {
+      alert("No se pudo guardar el mensaje en este navegador. Se va a usar hasta que cierres la app.");
+    }
+    closeSettings();
+  };
+
+  // Inserta un dato (ej. {paciente}) donde está el cursor
+  const insertPlaceholder = (key) => {
+    const token = `{${key}}`;
+    const el = templateRef.current;
+    if (!el) {
+      setTemplateDraft((prev) => prev + token);
+      return;
+    }
+    const start = el.selectionStart ?? templateDraft.length;
+    const end = el.selectionEnd ?? templateDraft.length;
+    setTemplateDraft(templateDraft.slice(0, start) + token + templateDraft.slice(end));
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(start + token.length, start + token.length);
+    });
+  };
+
+  // Turno de ejemplo para la vista previa: el próximo confirmado, o uno inventado
+  const sampleAppointment =
+    turnos
+      .filter((t) => t.status === "Confirmado" && slotTime(t.date, t.time) > now)
+      .sort((a, b) => slotTime(a.date, a.time) - slotTime(b.date, b.time))[0] || {
+      patientName: "María Pérez",
+      treatment: "Tratamiento",
+      date: toDateKey(new Date(now + 24 * 60 * 60 * 1000)),
+      time: "10:00",
+      consultorio: (consultorios && consultorios[0] && consultorios[0].name) || "",
+    };
+
+  // === ARRASTRAR Y SOLTAR ===
+  // Un horario sirve como destino si está libre y todavía no pasó
+  const canMoveTo = (dateKey, time) => !turnosBySlot.has(`${dateKey}|${time}`) && slotTime(dateKey, time) > now;
+
+  const handleDropOnSlot = (day, time) => {
+    const appointment = turnos.find((t) => t.id === draggingId);
+    setDraggingId(null);
+    setDropTarget(null);
+    const dateKey = toDateKey(day);
+    if (!appointment || !canMoveTo(dateKey, time)) return;
+
+    const when = day.toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" });
+    if (!window.confirm(`¿Mover el turno de ${appointment.patientName} al ${when} a las ${time}?`)) return;
+
+    runAction(async () => {
+      await updateDoc(doc(db, "turnos", appointment.id), { date: dateKey, time, reminderSentAt: null });
+    });
+  };
+
   // === MODALES ===
   const closeModal = () => {
     setAppointmentModalOpen(false);
@@ -125,6 +517,9 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
     setIsCancelling(false);
     setIsReassigning(false);
     setIsEditing(false);
+    setIsRescheduling(false);
+    setNewDate("");
+    setNewTime("");
     setCancelReason("");
     setAppointmentToDelete(null);
   };
@@ -255,6 +650,35 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
     });
   };
 
+  const handleRescheduleAppointment = () => {
+    if (!newDate || !newTime) {
+      alert("Elegí la nueva fecha y el nuevo horario.");
+      return;
+    }
+    if (newDate < todayKey) {
+      alert("No se puede reprogramar a una fecha pasada.");
+      return;
+    }
+    if (slotTime(newDate, newTime) <= Date.now()) {
+      alert("No se puede reprogramar a un horario que ya pasó.");
+      return;
+    }
+    if (turnosBySlot.has(`${newDate}|${newTime}`)) {
+      alert("Ese horario ya está ocupado.");
+      return;
+    }
+    runAction(async () => {
+      // Solo cambia fecha y hora; el resto del turno queda igual
+      await updateDoc(doc(db, "turnos", editingAppointmentDocId), {
+        date: newDate,
+        time: newTime,
+        reminderSentAt: null,
+      });
+      setCurrentWeekStart(getStartOfWeek(new Date(newDate + "T00:00:00")));
+      closeModal();
+    });
+  };
+
   const handleConfirmDeleteAppointment = () => {
     if (!appointmentToDelete) return;
     runAction(async () => {
@@ -275,7 +699,12 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
   // === LÓGICA DE RENDERIZADO DEL MODAL ===
   const isAdding = selectedAppointmentDetails === null && !isEditing;
   const isViewing =
-    selectedAppointmentDetails !== null && !isEditing && !isFinishing && !isCancelling && !isReassigning;
+    selectedAppointmentDetails !== null &&
+    !isEditing &&
+    !isFinishing &&
+    !isCancelling &&
+    !isReassigning &&
+    !isRescheduling;
   const isCompleted = selectedAppointmentDetails && selectedAppointmentDetails.status === "Finalizado";
   const isCancelled = selectedAppointmentDetails && selectedAppointmentDetails.status === "Cancelado";
 
@@ -284,20 +713,21 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
     if (isFinishing) return "Finalizar tratamiento";
     if (isCancelling) return "Cancelar turno";
     if (isReassigning) return "Reasignar turno cancelado";
+    if (isRescheduling) return "Reprogramar turno";
     if (isEditing) return "Editar turno";
     return "Detalles del turno";
   };
 
   const getModalActions = () => {
     let actions = [];
-    const baseAction = { label: "Cerrar", onClick: closeModal, className: "bg-gray-300 text-gray-700 hover:bg-gray-400" };
+    const baseAction = { label: "Cerrar", onClick: closeModal, className: "bg-gray-200 text-gray-700 hover:bg-gray-300" };
     const deleteAction = {
       label: "Eliminar",
       onClick: () => {
         confirmDeleteAppointment(selectedAppointmentDetails);
         setAppointmentModalOpen(false);
       },
-      className: "bg-red-500 text-white hover:bg-red-600",
+      className: "bg-white text-red-700 border border-red-200 hover:bg-red-50",
     };
 
     if (isAdding) {
@@ -306,25 +736,36 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
       if (!isCompleted && !isCancelled) {
         actions = [
           baseAction,
-          { label: "Editar", onClick: () => setIsEditing(true), className: "bg-yellow-400 text-white hover:bg-yellow-500" },
-          { label: "Cancelar turno", onClick: () => setIsCancelling(true), className: "bg-red-500 text-white hover:bg-red-600" },
+          { label: "Editar", onClick: () => setIsEditing(true), className: "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50" },
+          {
+            label: "Reprogramar",
+            onClick: () => {
+              setNewDate(selectedAppointmentDetails.date);
+              setNewTime("");
+              setIsRescheduling(true);
+            },
+            className: "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50",
+          },
+          { label: "Cancelar", onClick: () => setIsCancelling(true), className: "bg-white text-red-700 border border-red-200 hover:bg-red-50" },
           deleteAction,
-          { label: "Finalizar", onClick: () => setIsFinishing(true), className: "bg-green-500 text-white hover:bg-green-600" },
+          { label: "Finalizar", onClick: () => setIsFinishing(true), className: "bg-green-600 text-white hover:bg-green-700" },
         ];
       } else if (isCompleted) {
         actions = [
           baseAction,
-          { label: "Actualizar notas", onClick: () => setIsFinishing(true), className: "bg-green-500 text-white hover:bg-green-600" },
+          { label: "Actualizar notas", onClick: () => setIsFinishing(true), className: "bg-green-600 text-white hover:bg-green-700" },
         ];
       } else if (isCancelled) {
         actions = [
           baseAction,
-          { label: "Reasignar", onClick: () => setIsReassigning(true), className: "bg-blue-500 text-white hover:bg-blue-600" },
+          { label: "Reasignar", onClick: () => setIsReassigning(true), className: "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50" },
           deleteAction,
         ];
       }
     } else if (isEditing) {
       actions = [baseAction, { label: "Guardar cambios", onClick: handleUpdateAppointment }];
+    } else if (isRescheduling) {
+      actions = [baseAction, { label: "Reprogramar", onClick: handleRescheduleAppointment }];
     } else if (isReassigning) {
       actions = [baseAction, { label: "Reasignar", onClick: handleReassignAppointment }];
     } else if (isFinishing) {
@@ -337,21 +778,38 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
 
   return (
     <div>
-      {/* Encabezado y referencias de color */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+      {/* Encabezado */}
+      <div className="flex items-center justify-between gap-3 mb-2">
         <h2 className="text-2xl font-semibold text-pink-600">Agenda de turnos</h2>
-        <div className="flex flex-wrap gap-3 text-xs text-gray-600">
-          {Object.entries(STATUS_STYLES).map(([status, style]) => (
-            <span key={status} className="flex items-center gap-1">
-              <span className={`inline-block w-3 h-3 rounded ${style.chip}`} />
-              {status}
-            </span>
-          ))}
-        </div>
+        <button
+          onClick={openSettings}
+          aria-label="Configuración"
+          title="Configuración"
+          className="p-2 rounded-full text-pink-700 hover:bg-pink-100 transition-colors"
+        >
+          <AiOutlineSetting className="h-6 w-6" />
+        </button>
       </div>
 
+      {/* Referencias de color */}
+      <div className="flex flex-wrap gap-3 text-xs text-gray-600 mb-4">
+        {Object.entries(STATUS_STYLES).map(([status, style]) => (
+          <span key={status} className="flex items-center gap-1">
+            <span className={`inline-block w-2.5 h-2.5 rounded-full ${style.dot}`} />
+            {status}
+          </span>
+        ))}
+      </div>
+
+      <button
+        onClick={() => handleDayHeaderClick(nextWorkDay)}
+        className="mb-4 w-full sm:w-auto bg-green-50 text-green-800 border border-green-200 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-100 transition-colors"
+      >
+        Recordatorios para {nextWorkDayLabel}
+      </button>
+
       {/* Navegación de semanas */}
-      <div className="flex items-center justify-between gap-2 mb-4 bg-white rounded-lg shadow-sm px-3 py-2">
+      <div className="flex items-center justify-between gap-2 mb-4 bg-white rounded-2xl border border-gray-200 shadow-sm px-3 py-2">
         <button
           onClick={() => shiftWeek(-7)}
           aria-label="Semana anterior"
@@ -376,12 +834,16 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
         </button>
       </div>
 
+      <p className="hidden md:block text-xs text-gray-500 mb-2">
+        Con el mouse podés arrastrar un turno confirmado a otro horario libre, del mismo día o de otro día de esta semana.
+      </p>
+
       {/* Grilla semanal */}
-      <div className="isolate overflow-auto max-h-[70vh] rounded-lg shadow-sm bg-white">
+      <div className="isolate overflow-auto max-h-[70vh] rounded-2xl border border-gray-200 shadow-sm bg-white">
         <table className="min-w-[760px] w-full divide-y divide-gray-200 table-fixed">
           <thead>
             <tr>
-              <th className="w-16 px-3 py-2 text-left text-xs font-medium text-gray-500 sticky top-0 left-0 bg-pink-50 z-30">
+              <th className="w-16 px-3 py-2 text-left text-xs font-medium text-gray-500 sticky top-0 left-0 bg-gray-50 z-30">
                 Hora
               </th>
               {weekDates.map((day, i) => {
@@ -392,7 +854,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
                     onClick={() => handleDayHeaderClick(day)}
                     title="Ver los turnos del día"
                     className={`px-3 py-2 text-center text-xs font-medium cursor-pointer transition-colors sticky top-0 z-20 ${
-                      isToday ? "bg-pink-200 text-pink-900" : "bg-pink-50 text-gray-500 hover:bg-pink-100"
+                      isToday ? "bg-pink-100 text-pink-800" : "bg-gray-50 text-gray-500 hover:bg-gray-100"
                     }`}
                   >
                     {WEEKDAY_NAMES[i]}
@@ -414,14 +876,48 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
                   {time}
                 </td>
                 {weekDates.map((day, di) => {
+                  const dateKey = toDateKey(day);
+                  const slotKey = `${dateKey}|${time}`;
                   const appointment = getAppointment(day, time);
                   const style = appointment ? STATUS_STYLES[appointment.status] || STATUS_STYLES.Confirmado : null;
-                  const cellClass = style ? style.cell : "bg-gray-100 hover:bg-pink-50";
+                  const isPastSlot = slotTime(dateKey, time) <= now;
+                  const canDrag = Boolean(appointment) && appointment.status === "Confirmado" && !saving;
+                  const isValidTarget = Boolean(draggingId) && !appointment && !isPastSlot;
+
+                  let cellClass = isPastSlot ? "bg-gray-50 hover:bg-gray-100" : "bg-white hover:bg-pink-50";
+                  if (style) cellClass = style.cell;
+                  if (isValidTarget) cellClass = "bg-green-50";
+                  if (isValidTarget && dropTarget === slotKey) cellClass = "bg-pink-100 ring-2 ring-inset ring-pink-400";
+                  if (appointment && appointment.id === draggingId) cellClass += " opacity-50";
 
                   return (
                     <td
                       key={di}
-                      className={`group h-11 px-2 py-0.5 text-xs text-center border cursor-pointer transition-colors ${cellClass}`}
+                      draggable={canDrag}
+                      onDragStart={(e) => {
+                        if (!canDrag) return;
+                        e.dataTransfer.setData("text/plain", appointment.id);
+                        e.dataTransfer.effectAllowed = "move";
+                        setDraggingId(appointment.id);
+                      }}
+                      onDragEnd={() => {
+                        setDraggingId(null);
+                        setDropTarget(null);
+                      }}
+                      onDragOver={(e) => {
+                        if (isValidTarget) {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                          if (dropTarget !== slotKey) setDropTarget(slotKey);
+                        } else if (dropTarget !== null) {
+                          setDropTarget(null);
+                        }
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (isValidTarget) handleDropOnSlot(day, time);
+                      }}
+                      className={`group h-11 px-2 py-0.5 text-xs border cursor-pointer transition-colors ${appointment ? "text-left" : "text-center"} ${cellClass}`}
                       onClick={() => handleSlotClick(day, time)}
                     >
                       {appointment ? (
@@ -457,6 +953,11 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
                 <p><strong>Motivo de cancelación:</strong> {selectedAppointmentDetails.cancelReason}</p>
               )}
               {selectedAppointmentDetails.notes && <p><strong>Notas:</strong> {selectedAppointmentDetails.notes}</p>}
+              {selectedAppointmentDetails.status === "Confirmado" && (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {renderWhatsApp(selectedAppointmentDetails)}
+                </div>
+              )}
               {selectedAppointmentDetails.photos && selectedAppointmentDetails.photos.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2">
                   {selectedAppointmentDetails.photos.map((photo, i) => (
@@ -464,6 +965,56 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
                   ))}
                 </div>
               )}
+            </div>
+          ) : isRescheduling ? (
+            <div className="flex flex-col gap-3">
+              <p><strong>Paciente:</strong> {selectedAppointmentDetails?.patientName}</p>
+              <p>
+                <strong>Turno actual:</strong> {formatDate(selectedAppointmentDetails?.date)} a las{" "}
+                {selectedAppointmentDetails?.time}
+              </p>
+              <div>
+                <label htmlFor="nueva-fecha" className="block text-sm font-medium text-gray-700 mb-1">
+                  Nueva fecha
+                </label>
+                <input
+                  id="nueva-fecha"
+                  type="date"
+                  min={todayKey}
+                  value={newDate}
+                  onChange={(e) => {
+                    setNewDate(e.target.value);
+                    setNewTime("");
+                  }}
+                  className="border p-3 rounded w-full"
+                />
+              </div>
+              <div>
+                <label htmlFor="nuevo-horario" className="block text-sm font-medium text-gray-700 mb-1">
+                  Nuevo horario
+                </label>
+                {!newDate ? (
+                  <p className="text-sm text-gray-500">Elegí primero la fecha.</p>
+                ) : isSundayChosen ? (
+                  <p className="text-sm text-red-600">Los domingos no hay agenda. Elegí otro día.</p>
+                ) : availableTimes.length === 0 ? (
+                  <p className="text-sm text-gray-500">No hay horarios libres ese día.</p>
+                ) : (
+                  <select
+                    id="nuevo-horario"
+                    value={newTime}
+                    onChange={(e) => setNewTime(e.target.value)}
+                    className="border p-3 rounded w-full bg-white"
+                  >
+                    <option value="">Elegí un horario</option>
+                    {availableTimes.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
             </div>
           ) : (
             <div>
@@ -568,7 +1119,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
           <ul className="max-h-[60vh] overflow-y-auto">
             {dailyAppointments.map((a) => (
               <li key={a.id} className="bg-gray-100 p-3 mb-2 rounded flex justify-between items-center gap-3">
-                <div>
+                <div className="min-w-0 flex-1">
                   <div className="font-bold">{a.patientName}</div>
                   <div className="text-sm">
                     {a.time} &middot; {a.treatment} &middot; {a.consultorio}
@@ -580,6 +1131,9 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
                   >
                     {a.status}
                   </span>
+                  {a.status === "Confirmado" && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">{renderWhatsApp(a)}</div>
+                  )}
                 </div>
                 {(a.status === "Confirmado" || a.status === "Cancelado") && (
                   <button
@@ -600,13 +1154,118 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
         )}
       </Modal>
 
+      {/* Modal: configuración */}
+      <Modal
+        isOpen={settingsOpen}
+        onClose={closeSettings}
+        title="Configuración"
+        actions={
+          settingsTab === "message"
+            ? [
+                { label: "Cerrar", onClick: closeSettings, className: "bg-gray-200 text-gray-700 hover:bg-gray-300" },
+                {
+                  label: "Restaurar original",
+                  onClick: () => setTemplateDraft(DEFAULT_TEMPLATE),
+                  className: "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50",
+                },
+                { label: "Guardar mensaje", onClick: saveTemplate },
+              ]
+            : [{ label: "Cerrar", onClick: closeSettings, className: "bg-gray-200 text-gray-700 hover:bg-gray-300" }]
+        }
+      >
+        <div role="tablist" className="flex bg-pink-50 rounded-lg p-1 gap-1 mb-4">
+          {SETTINGS_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              role="tab"
+              aria-selected={settingsTab === tab.id}
+              onClick={() => setSettingsTab(tab.id)}
+              className={`flex-1 px-2 py-1.5 rounded-md text-sm transition-colors ${
+                settingsTab === tab.id ? "bg-white shadow text-pink-700 font-semibold" : "text-gray-600"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {settingsTab === "message" && (
+          <div className="flex flex-col gap-4">
+            <div>
+              <label htmlFor="mensaje" className="block text-sm font-medium text-gray-700 mb-1">
+                Mensaje de recordatorio
+              </label>
+              <textarea
+                id="mensaje"
+                ref={templateRef}
+                rows={8}
+                value={templateDraft}
+                onChange={(e) => setTemplateDraft(e.target.value)}
+                className="border p-3 rounded w-full text-sm"
+              />
+              <p className="text-xs text-gray-500 mt-1 mb-2">
+                Tocá un dato para insertarlo donde está el cursor. Se reemplaza por el del turno al enviar. Si una línea
+                solo tiene datos que no están cargados (por ejemplo la dirección), esa línea no se envía.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {PLACEHOLDERS.map((ph) => (
+                  <button
+                    key={ph.key}
+                    type="button"
+                    onClick={() => insertPlaceholder(ph.key)}
+                    className="px-2 py-1 rounded-full bg-pink-100 text-pink-800 text-xs hover:bg-pink-200 transition"
+                  >
+                    {ph.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="block text-sm font-medium text-gray-700 mb-1">Vista previa</p>
+              <div className="whitespace-pre-wrap break-words bg-green-50 border border-green-200 rounded p-3 text-sm">
+                {buildMessage(templateDraft, sampleAppointment, consultorios)}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Con los datos de un turno real próximo, o de ejemplo si no hay.</p>
+            </div>
+          </div>
+        )}
+
+        {settingsTab === "places" && (
+          <div>
+            <p className="text-xs text-gray-500 mb-2">
+              Se cargan en la pestaña Consultorios: dirección, localidad, provincia y, si querés, un link de Google Maps.
+              El nombre del lugar es el nombre del consultorio.
+            </p>
+            {(!consultorios || consultorios.length === 0) && (
+              <p className="text-sm text-gray-500">No hay consultorios cargados.</p>
+            )}
+            {(consultorios || []).map((c) => {
+              const address = buildAddress(c);
+              const mapsUrl = buildMapsUrl(c);
+              return (
+                <div key={c.id} className="border rounded p-3 mb-2 bg-gray-50 text-sm">
+                  <p className="font-semibold text-pink-800">{c.name}</p>
+                  <p className={address ? "text-gray-700" : "text-gray-500"}>{address || "Sin dirección cargada"}</p>
+                  {mapsUrl && (
+                    <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="text-pink-700 underline">
+                      Probar ubicación en Maps
+                    </a>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Modal>
+
       {/* Modal confirmar eliminar */}
       <Modal
         isOpen={isDeleteModalOpen}
         onClose={closeModal}
         title="Confirmar eliminación de turno"
         actions={[
-          { label: "Cancelar", onClick: closeModal, className: "bg-gray-300 text-gray-700 hover:bg-gray-400" },
+          { label: "Cancelar", onClick: closeModal, className: "bg-gray-200 text-gray-700 hover:bg-gray-300" },
           { label: "Eliminar", onClick: handleConfirmDeleteAppointment, className: "bg-red-500 text-white hover:bg-red-600" },
         ]}
       >
