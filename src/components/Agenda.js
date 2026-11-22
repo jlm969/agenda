@@ -21,21 +21,9 @@ const TIME_SLOTS = (() => {
 })();
 
 const STATUS_STYLES = {
-  Confirmado: {
-    cell: "bg-pink-50 text-pink-900 border-l-4 border-l-pink-500 hover:bg-pink-100",
-    chip: "bg-pink-100 text-pink-800",
-    dot: "bg-pink-500",
-  },
-  Finalizado: {
-    cell: "bg-green-50 text-green-900 border-l-4 border-l-green-500 hover:bg-green-100",
-    chip: "bg-green-100 text-green-800",
-    dot: "bg-green-500",
-  },
-  Cancelado: {
-    cell: "bg-red-50 text-red-900 border-l-4 border-l-red-500 hover:bg-red-100",
-    chip: "bg-red-100 text-red-800",
-    dot: "bg-red-500",
-  },
+  Confirmado: { cell: "bg-pink-200 text-pink-900 hover:bg-pink-300", chip: "bg-pink-200 text-pink-900" },
+  Finalizado: { cell: "bg-green-200 text-green-900 hover:bg-green-300", chip: "bg-green-200 text-green-900" },
+  Cancelado: { cell: "bg-red-300 text-red-950 font-semibold hover:bg-red-400", chip: "bg-red-300 text-red-950" },
 };
 
 const turnosRef = collection(db, "turnos");
@@ -720,14 +708,14 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
 
   const getModalActions = () => {
     let actions = [];
-    const baseAction = { label: "Cerrar", onClick: closeModal, className: "bg-gray-200 text-gray-700 hover:bg-gray-300" };
+    const baseAction = { label: "Cerrar", onClick: closeModal, className: "bg-gray-300 text-gray-700 hover:bg-gray-400" };
     const deleteAction = {
       label: "Eliminar",
       onClick: () => {
         confirmDeleteAppointment(selectedAppointmentDetails);
         setAppointmentModalOpen(false);
       },
-      className: "bg-white text-red-700 border border-red-200 hover:bg-red-50",
+      className: "bg-red-500 text-white hover:bg-red-600",
     };
 
     if (isAdding) {
@@ -736,7 +724,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
       if (!isCompleted && !isCancelled) {
         actions = [
           baseAction,
-          { label: "Editar", onClick: () => setIsEditing(true), className: "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50" },
+          { label: "Editar", onClick: () => setIsEditing(true), className: "bg-yellow-400 text-white hover:bg-yellow-500" },
           {
             label: "Reprogramar",
             onClick: () => {
@@ -744,21 +732,21 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
               setNewTime("");
               setIsRescheduling(true);
             },
-            className: "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50",
+            className: "bg-blue-500 text-white hover:bg-blue-600",
           },
-          { label: "Cancelar", onClick: () => setIsCancelling(true), className: "bg-white text-red-700 border border-red-200 hover:bg-red-50" },
+          { label: "Cancelar", onClick: () => setIsCancelling(true), className: "bg-red-500 text-white hover:bg-red-600" },
           deleteAction,
-          { label: "Finalizar", onClick: () => setIsFinishing(true), className: "bg-green-600 text-white hover:bg-green-700" },
+          { label: "Finalizar", onClick: () => setIsFinishing(true), className: "bg-green-500 text-white hover:bg-green-600" },
         ];
       } else if (isCompleted) {
         actions = [
           baseAction,
-          { label: "Actualizar notas", onClick: () => setIsFinishing(true), className: "bg-green-600 text-white hover:bg-green-700" },
+          { label: "Actualizar notas", onClick: () => setIsFinishing(true), className: "bg-green-500 text-white hover:bg-green-600" },
         ];
       } else if (isCancelled) {
         actions = [
           baseAction,
-          { label: "Reasignar", onClick: () => setIsReassigning(true), className: "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50" },
+          { label: "Reasignar", onClick: () => setIsReassigning(true), className: "bg-blue-500 text-white hover:bg-blue-600" },
           deleteAction,
         ];
       }
@@ -795,7 +783,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
       <div className="flex flex-wrap gap-3 text-xs text-gray-600 mb-4">
         {Object.entries(STATUS_STYLES).map(([status, style]) => (
           <span key={status} className="flex items-center gap-1">
-            <span className={`inline-block w-2.5 h-2.5 rounded-full ${style.dot}`} />
+            <span className={`inline-block w-3 h-3 rounded ${style.chip}`} />
             {status}
           </span>
         ))}
@@ -803,13 +791,13 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
 
       <button
         onClick={() => handleDayHeaderClick(nextWorkDay)}
-        className="mb-4 w-full sm:w-auto bg-green-50 text-green-800 border border-green-200 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-100 transition-colors"
+        className="mb-4 w-full sm:w-auto bg-green-600 text-white px-4 py-2 rounded-md text-sm font-semibold hover:bg-green-700 transition-colors"
       >
         Recordatorios para {nextWorkDayLabel}
       </button>
 
       {/* Navegación de semanas */}
-      <div className="flex items-center justify-between gap-2 mb-4 bg-white rounded-2xl border border-gray-200 shadow-sm px-3 py-2">
+      <div className="flex items-center justify-between gap-2 mb-4 bg-white rounded-lg shadow-sm px-3 py-2">
         <button
           onClick={() => shiftWeek(-7)}
           aria-label="Semana anterior"
@@ -839,11 +827,11 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
       </p>
 
       {/* Grilla semanal */}
-      <div className="isolate overflow-auto max-h-[70vh] rounded-2xl border border-gray-200 shadow-sm bg-white">
+      <div className="isolate overflow-auto max-h-[70vh] rounded-lg shadow-sm bg-white">
         <table className="min-w-[760px] w-full divide-y divide-gray-200 table-fixed">
           <thead>
             <tr>
-              <th className="w-16 px-3 py-2 text-left text-xs font-medium text-gray-500 sticky top-0 left-0 bg-gray-50 z-30">
+              <th className="w-16 px-3 py-2 text-left text-xs font-medium text-gray-500 sticky top-0 left-0 bg-pink-50 z-30">
                 Hora
               </th>
               {weekDates.map((day, i) => {
@@ -854,7 +842,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
                     onClick={() => handleDayHeaderClick(day)}
                     title="Ver los turnos del día"
                     className={`px-3 py-2 text-center text-xs font-medium cursor-pointer transition-colors sticky top-0 z-20 ${
-                      isToday ? "bg-pink-100 text-pink-800" : "bg-gray-50 text-gray-500 hover:bg-gray-100"
+                      isToday ? "bg-pink-200 text-pink-900" : "bg-pink-50 text-gray-500 hover:bg-pink-100"
                     }`}
                   >
                     {WEEKDAY_NAMES[i]}
@@ -884,7 +872,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
                   const canDrag = Boolean(appointment) && appointment.status === "Confirmado" && !saving;
                   const isValidTarget = Boolean(draggingId) && !appointment && !isPastSlot;
 
-                  let cellClass = isPastSlot ? "bg-gray-50 hover:bg-gray-100" : "bg-white hover:bg-pink-50";
+                  let cellClass = isPastSlot ? "bg-gray-50 hover:bg-gray-100" : "bg-gray-100 hover:bg-pink-50";
                   if (style) cellClass = style.cell;
                   if (isValidTarget) cellClass = "bg-green-50";
                   if (isValidTarget && dropTarget === slotKey) cellClass = "bg-pink-100 ring-2 ring-inset ring-pink-400";
@@ -917,7 +905,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
                         e.preventDefault();
                         if (isValidTarget) handleDropOnSlot(day, time);
                       }}
-                      className={`group h-11 px-2 py-0.5 text-xs border cursor-pointer transition-colors ${appointment ? "text-left" : "text-center"} ${cellClass}`}
+                      className={`group h-11 px-2 py-0.5 text-xs text-center border cursor-pointer transition-colors ${cellClass}`}
                       onClick={() => handleSlotClick(day, time)}
                     >
                       {appointment ? (
@@ -1162,15 +1150,15 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
         actions={
           settingsTab === "message"
             ? [
-                { label: "Cerrar", onClick: closeSettings, className: "bg-gray-200 text-gray-700 hover:bg-gray-300" },
+                { label: "Cerrar", onClick: closeSettings, className: "bg-gray-300 text-gray-700 hover:bg-gray-400" },
                 {
                   label: "Restaurar original",
                   onClick: () => setTemplateDraft(DEFAULT_TEMPLATE),
-                  className: "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50",
+                  className: "bg-yellow-400 text-white hover:bg-yellow-500",
                 },
                 { label: "Guardar mensaje", onClick: saveTemplate },
               ]
-            : [{ label: "Cerrar", onClick: closeSettings, className: "bg-gray-200 text-gray-700 hover:bg-gray-300" }]
+            : [{ label: "Cerrar", onClick: closeSettings, className: "bg-gray-300 text-gray-700 hover:bg-gray-400" }]
         }
       >
         <div role="tablist" className="flex bg-pink-50 rounded-lg p-1 gap-1 mb-4">
@@ -1265,7 +1253,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
         onClose={closeModal}
         title="Confirmar eliminación de turno"
         actions={[
-          { label: "Cancelar", onClick: closeModal, className: "bg-gray-200 text-gray-700 hover:bg-gray-300" },
+          { label: "Cancelar", onClick: closeModal, className: "bg-gray-300 text-gray-700 hover:bg-gray-400" },
           { label: "Eliminar", onClick: handleConfirmDeleteAppointment, className: "bg-red-500 text-white hover:bg-red-600" },
         ]}
       >

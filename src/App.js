@@ -149,8 +149,8 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState("appointments");
 
   const getTabButtonClass = (tabName) =>
-    `px-4 py-1.5 font-medium transition-colors duration-200 rounded-full text-sm whitespace-nowrap ${
-      activeTab === tabName ? "bg-pink-600 text-white" : "text-gray-600 hover:bg-gray-100"
+    `px-4 py-2 font-semibold transition-all duration-300 rounded-md text-sm whitespace-nowrap ${
+      activeTab === tabName ? "bg-pink-600 text-white" : "text-gray-600 hover:bg-gray-200"
     }`;
 
   // Pantalla de carga mientras se verifica la sesión
@@ -172,16 +172,13 @@ function AppContent() {
   }
 
   return (
-    <div className="bg-gray-50 min-h-screen font-sans">
+    <div className="bg-gradient-to-br from-pink-50 to-pink-100 min-h-screen font-sans">
       {/* BARRA DE NAVEGACIÓN */}
-      <nav className="sticky top-0 z-40 px-4 pt-3 pb-3 bg-white/90 backdrop-blur border-b border-gray-200">
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <img src={logo} alt="Logo LH" className="w-10 shrink-0" />
-            <div className="min-w-0 leading-tight">
-              <h1 className="text-2xl font-semibold text-gray-900 truncate">Liset Herzog</h1>
-              <p className="text-[10px] tracking-[0.2em] uppercase text-gray-500">Medicina Estética</p>
-            </div>
+      <nav className="sticky top-0 z-40 p-4 bg-white shadow-md">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div className="flex items-center space-x-2 min-w-0">
+            <img src={logo} alt="Logo LH" className="w-10" />
+            <h1 className="text-sm font-bold text-pink-800">Liset Herzog - Medicina Estética</h1>
           </div>
           <div className="flex items-center space-x-2 text-sm shrink-0">
             <span className="hidden sm:inline text-gray-600">Hola, {user.email}</span>
@@ -214,7 +211,7 @@ function AppContent() {
         {activeTab === "appointments" && (
           <Agenda patients={patients} turnos={turnos} consultorios={consultorios} treatments={treatments} />
         )}
-        {activeTab === "patients" && <Pacientes patients={patients} />}
+        {activeTab === "patients" && <Pacientes patients={patients} turnos={turnos} />}
         {activeTab === "treatments" && <Tratamientos treatments={treatments} />}
         {activeTab === "consultorios" && <Consultorios consultorios={consultorios} />}
         {activeTab === "dashboard" && <Dashboard turnos={turnos} />}

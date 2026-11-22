@@ -319,7 +319,7 @@ const Dashboard = ({ turnos = [] }) => {
       <h2 className="text-2xl font-semibold text-pink-600">Estadísticas</h2>
 
       {/* Filtros */}
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-3 flex flex-col gap-2">
+      <div className="bg-white rounded-lg shadow-sm p-3 flex flex-col gap-2">
         <div className="relative">
           <input
             id="f-paciente"
@@ -420,7 +420,7 @@ const Dashboard = ({ turnos = [] }) => {
       ) : (
         <>
           {/* Resumen */}
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4">
+          <div className="bg-white rounded-lg shadow-sm p-4">
             <div className="flex items-end justify-between gap-3">
               <div>
                 <p className="text-xs text-gray-500">Tratamientos realizados</p>
@@ -462,7 +462,7 @@ const Dashboard = ({ turnos = [] }) => {
           {doneTotal === 0 ? (
             <p className="text-sm text-gray-500">No hay tratamientos realizados con estos filtros.</p>
           ) : (
-            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-3">
+            <div className="bg-white rounded-lg shadow-sm p-3">
               {/* Selector de vista: se muestra una sola lista a la vez */}
               <div role="tablist" className="flex bg-pink-50 rounded-lg p-1 gap-1 mb-3">
                 {views.map((v) => (

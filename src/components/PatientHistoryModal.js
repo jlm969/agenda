@@ -8,6 +8,15 @@ const STATUS_STYLES = {
   Confirmado: { bar: 'border-l-pink-500', chip: 'bg-pink-100 text-pink-800' },
 };
 
+// Para comparar nombres sin importar mayúsculas, acentos ni espacios de más
+const normalizeName = (s) =>
+  String(s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    .trim();
+
 const formatDate = (key) => (key ? new Date(key + 'T00:00:00').toLocaleDateString('es-AR') : '');
 
 const PatientHistoryModal = ({ isOpen, onClose, patient, appointments = [] }) => {
@@ -18,7 +27,7 @@ const PatientHistoryModal = ({ isOpen, onClose, patient, appointments = [] }) =>
 
   // Turnos del paciente, del más reciente al más antiguo
   const patientAppointments = appointments
-    .filter((appointment) => appointment.patientName === patient.name)
+    .filter((appointment) => normalizeName(appointment.patientName) === normalizeName(patient.name))
     .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.time || '').localeCompare(a.time || ''));
 
   // Abrir modal con notas o con Motivo de cancelación

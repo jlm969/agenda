@@ -150,7 +150,7 @@ function Tratamientos({ treatments = [] }) {
           return (
             <li
               key={t.id}
-              className="bg-white p-4 rounded-2xl shadow-sm border border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+              className="bg-gray-50 p-4 rounded-xl shadow-md border border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
             >
               <div className="min-w-0">
                 <div className="font-bold text-lg text-pink-800">{t.name}</div>
