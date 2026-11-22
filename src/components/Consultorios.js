@@ -175,7 +175,7 @@ function Consultorios({ consultorios = [] }) {
           const address = buildAddress(c);
           const mapsUrl = buildMapsUrl(c);
           return (
-            <li key={c.id} className="bg-gray-50 p-4 rounded-xl shadow-md border border-gray-200 flex justify-between items-center gap-3">
+            <li key={c.id} className="bg-gray-50 p-4 rounded-xl shadow-md border border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="min-w-0">
                 <div className="font-bold text-lg text-pink-800">{c.name}</div>
                 {address && <div className="text-sm text-gray-700">{address}</div>}
@@ -186,9 +186,9 @@ function Consultorios({ consultorios = [] }) {
                   </a>
                 )}
               </div>
-              <div className="mt-2 flex items-center shrink-0">
+              <div className="grid grid-cols-2 gap-2 sm:flex shrink-0">
                 <button
-                  className="bg-yellow-400 text-white px-4 py-2 rounded text-sm mr-2 hover:bg-yellow-500 transition flex items-center space-x-1"
+                  className="bg-white text-gray-700 border border-gray-300 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition flex items-center justify-center space-x-1"
                   onClick={() => openEditModal(i)}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -197,7 +197,7 @@ function Consultorios({ consultorios = [] }) {
                   <span>Editar</span>
                 </button>
                 <button
-                  className="bg-red-500 text-white px-4 py-2 rounded text-sm hover:bg-red-600 transition flex items-center space-x-1"
+                  className="bg-red-50 text-red-700 border border-red-200 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 transition flex items-center justify-center space-x-1"
                   onClick={() => confirmDelete(i)}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">

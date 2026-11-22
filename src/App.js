@@ -211,7 +211,7 @@ function AppContent() {
         {activeTab === "appointments" && (
           <Agenda patients={patients} turnos={turnos} consultorios={consultorios} treatments={treatments} />
         )}
-        {activeTab === "patients" && <Pacientes patients={patients} />}
+        {activeTab === "patients" && <Pacientes patients={patients} turnos={turnos} />}
         {activeTab === "treatments" && <Tratamientos treatments={treatments} />}
         {activeTab === "consultorios" && <Consultorios consultorios={consultorios} />}
         {activeTab === "dashboard" && <Dashboard turnos={turnos} />}

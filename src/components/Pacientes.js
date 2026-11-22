@@ -1,10 +1,10 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import Modal from "./Modal";
 import useCRUDModal from "../hooks/useCRUDModal";
 import PatientHistoryModal from "./PatientHistoryModal";
 import { useReactToPrint } from "react-to-print";
 import { AiOutlinePrinter } from "react-icons/ai";
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where } from "firebase/firestore";
+import { collection, addDoc, updateDoc, deleteDoc, doc, writeBatch } from "firebase/firestore";
 import { db } from "../firebase";
 
 const EMPTY_PATIENT = { name: "", phone: "", email: "", photo: "" };
@@ -22,8 +22,75 @@ const normalize = (s) =>
   String(s || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
     .toLowerCase()
     .trim();
+
+// ---- Pacientes repetidos ----
+const clean = (v) => String(v ?? "").trim();
+const digits = (s) => String(s || "").replace(/\D/g, "");
+const hasHistorial = (p) =>
+  Boolean(p.historialClinico) && Object.values(p.historialClinico).some((v) => clean(v) !== "");
+
+// Cuántos datos tiene cargados una ficha (para proponer cuál conservar)
+const filledScore = (p) =>
+  ["phone", "email", "photo"].filter((f) => clean(p[f]) !== "").length + (hasHistorial(p) ? 2 : 0);
+
+const describePatient = (p) => {
+  const parts = [];
+  if (clean(p.phone)) parts.push(clean(p.phone));
+  if (clean(p.email)) parts.push(clean(p.email));
+  if (hasHistorial(p)) parts.push("historia clínica");
+  if (clean(p.photo)) parts.push("foto");
+  return parts.length ? parts.join(" · ") : "sin datos cargados";
+};
+
+const bestToKeep = (group) => group.reduce((best, p) => (filledScore(p) > filledScore(best) ? p : best), group[0]);
+
+// Hay conflicto si dos fichas tienen datos distintos en el mismo campo (podrían ser personas diferentes)
+const hasConflict = (group) => {
+  const differs = (values) => new Set(values.filter((v) => v !== "")).size > 1;
+  return (
+    differs(group.map((p) => digits(p.phone))) ||
+    differs(group.map((p) => clean(p.email).toLowerCase())) ||
+    differs(group.filter(hasHistorial).map((p) => JSON.stringify(p.historialClinico)))
+  );
+};
+
+// Cambios para unir un grupo: a la ficha que se conserva se le completan los datos que le falten
+// con los de las otras, y después se eliminan las otras.
+const buildMergeOps = (group, keepId) => {
+  const keep = group.find((p) => p.id === keepId);
+  const others = group.filter((p) => p.id !== keepId);
+  const patch = {};
+  ["phone", "email", "photo"].forEach((field) => {
+    if (clean(keep[field]) === "") {
+      const source = others.find((o) => clean(o[field]) !== "");
+      if (source) patch[field] = source[field];
+    }
+  });
+  if (!hasHistorial(keep)) {
+    const source = others.find(hasHistorial);
+    if (source) patch.historialClinico = source.historialClinico;
+  }
+  const ops = [];
+  if (Object.keys(patch).length > 0) ops.push({ type: "update", id: keep.id, data: patch });
+  others.forEach((o) => ops.push({ type: "delete", id: o.id }));
+  return ops;
+};
+
+// Firestore admite hasta 500 cambios por tanda: se hacen de a 400
+const commitOps = async (ops) => {
+  for (let i = 0; i < ops.length; i += 400) {
+    const batch = writeBatch(db);
+    ops.slice(i, i + 400).forEach((op) => {
+      const ref = doc(db, "pacientes", op.id);
+      if (op.type === "update") batch.update(ref, op.data);
+      else batch.delete(ref);
+    });
+    await batch.commit();
+  }
+};
 
 // Las fotos se guardan dentro del documento del paciente (Firestore admite hasta 1 MB por documento).
 // Una foto de celular pesa varios MB, así que se achica antes de guardarla.
@@ -50,7 +117,9 @@ const resizePhoto = (file) =>
 
 // Botones de cada paciente: compactos en el celular, con ícono en pantallas grandes
 const ACTION_BTN =
-  "px-1 sm:px-4 py-2 rounded text-xs sm:text-sm text-white transition-colors flex items-center justify-center sm:space-x-1";
+  "px-1 sm:px-4 py-2 rounded-lg border text-xs sm:text-sm font-medium transition-colors flex items-center justify-center sm:space-x-1";
+const NEUTRAL_BTN = "bg-white text-gray-700 border-gray-300 hover:bg-gray-50";
+const DANGER_BTN = "bg-red-50 text-red-700 border-red-200 hover:bg-red-100";
 const ICON = "hidden sm:block h-4 w-4";
 
 // Componente para imprimir el historial clínico
@@ -90,7 +159,8 @@ const PrintableHistorial = React.forwardRef(({ patient, historial }, ref) => {
 });
 
 // Los pacientes llegan desde App.js (ya cargados en tiempo real)
-const Pacientes = ({ patients = [] }) => {
+// Los pacientes y los turnos llegan desde App.js (ya cargados en tiempo real)
+const Pacientes = ({ patients = [], turnos = [] }) => {
   const [newPatient, setNewPatient] = useState(EMPTY_PATIENT);
   const [editingPatientIndex, setEditingPatientIndex] = useState(null);
   const [filter, setFilter] = useState("");
@@ -101,8 +171,10 @@ const Pacientes = ({ patients = [] }) => {
   const [treatmentHistoryModalOpen, setTreatmentHistoryModalOpen] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null);
 
-  // Turnos del paciente elegido (para el modal de Historial)
-  const [turnosDelPaciente, setTurnosDelPaciente] = useState([]);
+  // Pacientes repetidos
+  const [dupOpen, setDupOpen] = useState(false);
+  const [keepChoice, setKeepChoice] = useState({});
+  const [merging, setMerging] = useState(false);
 
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [historialClinico, setHistorialClinico] = useState(EMPTY_HISTORIAL);
@@ -125,20 +197,63 @@ const Pacientes = ({ patients = [] }) => {
     `,
   });
 
-  // Turnos del paciente seleccionado (en tiempo real)
-  useEffect(() => {
-    if (!selectedPatient) return undefined;
+  // Turnos del paciente elegido (para el modal de Historial). Se buscan por nombre sin importar
+  // mayúsculas, acentos ni espacios de más.
+  const turnosDelPaciente = useMemo(() => {
+    if (!selectedPatient) return [];
+    const key = normalize(selectedPatient.name);
+    return turnos.filter((t) => normalize(t.patientName) === key);
+  }, [turnos, selectedPatient]);
 
-    const turnosRef = collection(db, "turnos");
-    const q = query(turnosRef, where("patientName", "==", selectedPatient.name));
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const turnosList = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setTurnosDelPaciente(turnosList);
+  // Grupos de fichas con el mismo nombre
+  const duplicateGroups = useMemo(() => {
+    const map = new Map();
+    patients.forEach((p) => {
+      const key = normalize(p.name);
+      if (!key) return;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(p);
     });
+    return [...map.entries()]
+      .filter(([, group]) => group.length > 1)
+      .map(([key, group]) => ({ key, group, conflict: hasConflict(group) }));
+  }, [patients]);
+  const safeGroups = duplicateGroups.filter((g) => !g.conflict);
+  const keepIdFor = (g) => (g.group.some((p) => p.id === keepChoice[g.key]) ? keepChoice[g.key] : bestToKeep(g.group).id);
 
-    return () => unsubscribe();
-  }, [selectedPatient]);
+  const mergeOne = async (g) => {
+    if (merging) return;
+    const removing = g.group.length - 1;
+    const message = `Se va a conservar 1 ficha de ${clean(g.group[0].name)} y eliminar ${removing} repetida${
+      removing > 1 ? "s" : ""
+    }. Esta acción no se puede deshacer. ¿Continuar?`;
+    if (!window.confirm(message)) return;
+    setMerging(true);
+    try {
+      await commitOps(buildMergeOps(g.group, keepIdFor(g)));
+    } catch (error) {
+      console.error("Error al unir pacientes:", error);
+      alert("No se pudo unir. Revisá tu conexión e intentá de nuevo.");
+    } finally {
+      setMerging(false);
+    }
+  };
+
+  const mergeAllSafe = async () => {
+    if (merging || safeGroups.length === 0) return;
+    const total = safeGroups.reduce((n, g) => n + g.group.length - 1, 0);
+    const message = `Se van a unir ${safeGroups.length} nombres repetidos y eliminar ${total} fichas repetidas. En cada caso se conserva la ficha con más datos y se le completan los que falten. Esta acción no se puede deshacer. ¿Continuar?`;
+    if (!window.confirm(message)) return;
+    setMerging(true);
+    try {
+      await commitOps(safeGroups.flatMap((g) => buildMergeOps(g.group, bestToKeep(g.group).id)));
+    } catch (error) {
+      console.error("Error al unir pacientes:", error);
+      alert("No se pudieron unir todos. Revisá tu conexión e intentá de nuevo.");
+    } finally {
+      setMerging(false);
+    }
+  };
 
   // ---- Alta, edición y baja ----
   const openAddPatientModal = () => {
@@ -171,8 +286,19 @@ const Pacientes = ({ patients = [] }) => {
   };
 
   const handleSavePatient = async () => {
-    if (!String(newPatient.name || "").trim()) {
+    const name = String(newPatient.name || "").trim();
+    if (!name) {
       alert("El nombre del paciente es obligatorio.");
+      return;
+    }
+    // Aviso si ya existe un paciente con ese nombre (evita crear repetidos sin querer)
+    const original = editingPatientIndex !== null ? patients[editingPatientIndex] : null;
+    const nameChanged = !original || normalize(original.name) !== normalize(name);
+    if (
+      nameChanged &&
+      patients.some((p) => normalize(p.name) === normalize(name)) &&
+      !window.confirm(`Ya hay un paciente llamado "${name}". ¿Querés guardarlo igual como otro paciente?`)
+    ) {
       return;
     }
     if (saving) return;
@@ -228,7 +354,6 @@ const Pacientes = ({ patients = [] }) => {
   const handleCloseTreatmentHistory = () => {
     setTreatmentHistoryModalOpen(false);
     setSelectedPatient(null);
-    setTurnosDelPaciente([]);
   };
 
   // ---- Historia clínica (modal + guardar en Firestore) ----
@@ -304,6 +429,19 @@ const Pacientes = ({ patients = [] }) => {
         {q ? `${filteredPatients.length} de ${patients.length} pacientes` : `${patients.length} pacientes`}
       </p>
 
+      {duplicateGroups.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-yellow-50 border border-yellow-200 px-3 py-2 text-sm text-yellow-800">
+          <span>
+            {duplicateGroups.length === 1
+              ? "Hay 1 nombre repetido."
+              : `Hay ${duplicateGroups.length} nombres repetidos.`}
+          </span>
+          <button onClick={() => setDupOpen(true)} className="font-semibold underline hover:text-yellow-900">
+            Revisar
+          </button>
+        </div>
+      )}
+
       <ul className="space-y-3 max-h-[70vh] overflow-y-auto">
         {filteredPatients.length > 0 ? (
           filteredPatients.map((patient) => {
@@ -334,7 +472,7 @@ const Pacientes = ({ patients = [] }) => {
                 <div className="grid grid-cols-4 gap-1.5 sm:flex sm:gap-2 shrink-0">
                   <button
                     onClick={() => handleViewTreatmentHistory(patient)}
-                    className={`${ACTION_BTN} bg-purple-500 hover:bg-purple-600`}
+                    className={`${ACTION_BTN} ${NEUTRAL_BTN}`}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className={ICON} viewBox="0 0 20 20" fill="currentColor">
                       <path
@@ -347,7 +485,7 @@ const Pacientes = ({ patients = [] }) => {
                   </button>
                   <button
                     onClick={() => handleOpenHistory(patient)}
-                    className={`${ACTION_BTN} bg-blue-500 hover:bg-blue-600`}
+                    className={`${ACTION_BTN} ${NEUTRAL_BTN}`}
                   >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
@@ -370,7 +508,7 @@ const Pacientes = ({ patients = [] }) => {
                   </button>
                   <button
                     onClick={() => openEditPatientModal(originalIndex)}
-                    className={`${ACTION_BTN} bg-yellow-400 hover:bg-yellow-500`}
+                    className={`${ACTION_BTN} ${NEUTRAL_BTN}`}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className={ICON} viewBox="0 0 20 20" fill="currentColor">
                       <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
@@ -379,7 +517,7 @@ const Pacientes = ({ patients = [] }) => {
                   </button>
                   <button
                     onClick={() => confirmDelete(originalIndex)}
-                    className={`${ACTION_BTN} bg-red-500 hover:bg-red-600`}
+                    className={`${ACTION_BTN} ${DANGER_BTN}`}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className={ICON} viewBox="0 0 20 20" fill="currentColor">
                       <path
@@ -575,6 +713,78 @@ const Pacientes = ({ patients = [] }) => {
         patient={selectedPatient}
         appointments={turnosDelPaciente}
       />
+
+      {/* Modal para revisar y unir pacientes repetidos */}
+      <Modal
+        isOpen={dupOpen}
+        onClose={() => setDupOpen(false)}
+        title="Pacientes repetidos"
+        actions={[
+          { label: "Cerrar", onClick: () => setDupOpen(false), className: "bg-gray-300 text-gray-700 hover:bg-gray-400" },
+          ...(safeGroups.length > 1
+            ? [
+                {
+                  label: `Unir los ${safeGroups.length} sin conflicto`,
+                  onClick: mergeAllSafe,
+                  className: "bg-green-500 text-white hover:bg-green-600",
+                },
+              ]
+            : []),
+        ]}
+      >
+        <p className="text-sm text-gray-700">
+          Fichas con el mismo nombre. Elegí cuál conservar: se le completan los datos que falten con los de las otras
+          y se eliminan las repetidas. Los turnos no se pierden, porque se asocian por nombre.
+        </p>
+        {duplicateGroups.length === 0 ? (
+          <p className="mt-3 text-sm text-gray-500">No hay pacientes repetidos.</p>
+        ) : (
+          <ul className="mt-3 max-h-[55vh] overflow-y-auto space-y-3">
+            {duplicateGroups.map((g) => (
+              <li key={g.key} className="border border-gray-200 rounded-xl p-3 bg-gray-50">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-semibold text-pink-800">{clean(g.group[0].name)}</p>
+                  <span
+                    className={`shrink-0 text-xs px-2 py-0.5 rounded-full ${
+                      g.conflict ? "bg-yellow-100 text-yellow-800" : "bg-green-100 text-green-800"
+                    }`}
+                  >
+                    {g.conflict ? "Datos distintos" : "Sin conflicto"}
+                  </span>
+                </div>
+                <div className="mt-2 space-y-1">
+                  {g.group.map((p, i) => (
+                    <label key={p.id} className="flex items-start gap-2 text-sm cursor-pointer">
+                      <input
+                        type="radio"
+                        name={`keep-${g.key}`}
+                        checked={keepIdFor(g) === p.id}
+                        onChange={() => setKeepChoice({ ...keepChoice, [g.key]: p.id })}
+                        className="mt-1"
+                      />
+                      <span className="text-gray-700 break-words">
+                        <b>Ficha {i + 1}:</b> {describePatient(p)}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                {g.conflict && (
+                  <p className="mt-2 text-xs text-yellow-800">
+                    Tienen teléfono, email o historia clínica distintos: puede ser otra persona. Revisalo antes de unir.
+                  </p>
+                )}
+                <button
+                  onClick={() => mergeOne(g)}
+                  disabled={merging}
+                  className="mt-3 w-full bg-pink-500 text-white py-2 rounded-lg text-sm hover:bg-pink-600 disabled:opacity-60"
+                >
+                  Conservar la elegida y eliminar las otras
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Modal>
 
       {/* Modal de confirmación de eliminación */}
       <Modal title="Confirmar Eliminación" isOpen={itemToDelete !== null} onClose={cancelDelete}>
