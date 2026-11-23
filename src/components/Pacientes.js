@@ -176,6 +176,9 @@ const Pacientes = ({ patients = [], turnos = [] }) => {
   const [keepChoice, setKeepChoice] = useState({});
   const [merging, setMerging] = useState(false);
 
+  // Aviso cuando un paciente no se puede eliminar porque tiene datos que se perderían
+  const [blockedInfo, setBlockedInfo] = useState(null);
+
   // Ventana de confirmación dentro de la app (en lugar del cartel del navegador)
   const [confirmState, setConfirmState] = useState(null);
   const askConfirm = (config) => setConfirmState(config);
@@ -225,6 +228,37 @@ const Pacientes = ({ patients = [], turnos = [] }) => {
   const safeGroups = duplicateGroups.filter((g) => !g.conflict);
   const keepIdFor = (g) => (g.group.some((p) => p.id === keepChoice[g.key]) ? keepChoice[g.key] : bestToKeep(g.group).id);
 
+  // Datos asociados a un paciente (los turnos se asocian por nombre, sin importar mayúsculas ni acentos)
+  const getPatientData = (patient) => {
+    const key = normalize(patient.name);
+    const mine = turnos.filter((t) => normalize(t.patientName) === key);
+    return {
+      finalizados: mine.filter((t) => t.status === "Finalizado").length,
+      cancelados: mine.filter((t) => t.status === "Cancelado").length,
+      agendados: mine.filter((t) => t.status !== "Finalizado" && t.status !== "Cancelado").length,
+      historial: hasHistorial(patient),
+    };
+  };
+  // No se puede eliminar un paciente con tratamientos realizados, turnos agendados o historia clínica
+  const isProtected = (data) => data.finalizados > 0 || data.agendados > 0 || data.historial;
+  const showBlocked = (patient, data) =>
+    setBlockedInfo({
+      patient,
+      ...data,
+      repeated: duplicateGroups.some((g) => g.group.some((p) => p.id === patient.id)),
+    });
+
+  const requestDelete = (index) => {
+    const patient = patients[index];
+    if (!patient) return;
+    const data = getPatientData(patient);
+    if (isProtected(data)) {
+      showBlocked(patient, data);
+      return;
+    }
+    confirmDelete(index);
+  };
+
   const runMerge = async (ops, errorMessage) => {
     if (merging) return;
     setMerging(true);
@@ -241,6 +275,20 @@ const Pacientes = ({ patients = [], turnos = [] }) => {
   const mergeOne = (g) => {
     if (merging) return;
     const removing = g.group.length - 1;
+    const keep = g.group.find((p) => p.id === keepIdFor(g));
+    const wouldLoseHistory = g.group.some(
+      (o) =>
+        o.id !== keep.id &&
+        hasHistorial(o) &&
+        hasHistorial(keep) &&
+        JSON.stringify(o.historialClinico) !== JSON.stringify(keep.historialClinico)
+    );
+    if (wouldLoseHistory) {
+      alert(
+        "No se puede unir: la ficha que se eliminaría tiene una historia clínica distinta de la que se conserva. Revisá cuál corresponde y copiá a mano lo que haga falta."
+      );
+      return;
+    }
     const ops = buildMergeOps(g.group, keepIdFor(g));
     askConfirm({
       title: "Unir pacientes repetidos",
@@ -332,6 +380,13 @@ const Pacientes = ({ patients = [], turnos = [] }) => {
     const patient = patients[itemToDelete];
     if (!patient) {
       cancelDelete();
+      return;
+    }
+    // Se vuelve a controlar por si apareció un turno mientras tanto
+    const data = getPatientData(patient);
+    if (isProtected(data)) {
+      cancelDelete();
+      showBlocked(patient, data);
       return;
     }
     try {
@@ -529,7 +584,7 @@ const Pacientes = ({ patients = [], turnos = [] }) => {
                     <span>Editar</span>
                   </button>
                   <button
-                    onClick={() => confirmDelete(originalIndex)}
+                    onClick={() => requestDelete(originalIndex)}
                     className={`${ACTION_BTN} ${DANGER_BTN}`}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className={ICON} viewBox="0 0 20 20" fill="currentColor">
@@ -802,6 +857,14 @@ const Pacientes = ({ patients = [], turnos = [] }) => {
       {/* Modal de confirmación de eliminación */}
       <Modal title="Confirmar Eliminación" isOpen={itemToDelete !== null} onClose={cancelDelete}>
         <p>¿Estás seguro de que deseas eliminar a este paciente? Esta acción no se puede deshacer.</p>
+        {itemToDelete !== null && patients[itemToDelete] && getPatientData(patients[itemToDelete]).cancelados > 0 && (
+          <p className="text-sm text-gray-600 mt-2">
+            Tiene {getPatientData(patients[itemToDelete]).cancelados} turno
+            {getPatientData(patients[itemToDelete]).cancelados === 1 ? "" : "s"} cancelado
+            {getPatientData(patients[itemToDelete]).cancelados === 1 ? "" : "s"} en el historial, que quedará
+            {getPatientData(patients[itemToDelete]).cancelados === 1 ? "" : "n"} sin paciente asociado.
+          </p>
+        )}
         <div className="flex justify-end gap-2 mt-4">
           <button
             onClick={cancelDelete}
@@ -816,6 +879,44 @@ const Pacientes = ({ patients = [], turnos = [] }) => {
             Confirmar Eliminación
           </button>
         </div>
+      </Modal>
+
+      {/* Aviso: el paciente no se puede eliminar */}
+      <Modal title="No se puede eliminar" isOpen={blockedInfo !== null} onClose={() => setBlockedInfo(null)}>
+        {blockedInfo && (
+          <>
+            <p className="text-gray-700">
+              <strong>{clean(blockedInfo.patient.name)}</strong> tiene datos que no se pueden perder:
+            </p>
+            <ul className="list-disc pl-5 mt-2 text-gray-700 space-y-1">
+              {blockedInfo.finalizados > 0 && (
+                <li>
+                  {blockedInfo.finalizados} tratamiento{blockedInfo.finalizados === 1 ? "" : "s"} realizado
+                  {blockedInfo.finalizados === 1 ? "" : "s"} (turnos finalizados)
+                </li>
+              )}
+              {blockedInfo.agendados > 0 && (
+                <li>
+                  {blockedInfo.agendados} turno{blockedInfo.agendados === 1 ? "" : "s"} agendado
+                  {blockedInfo.agendados === 1 ? "" : "s"}
+                </li>
+              )}
+              {blockedInfo.historial && <li>Historia clínica cargada</li>}
+            </ul>
+            <p className="text-sm text-gray-500 mt-3">
+              {blockedInfo.agendados > 0 && "Los turnos agendados se pueden cancelar o eliminar desde la Agenda. "}
+              {blockedInfo.repeated && "Si la ficha está repetida, usá \"Revisar\" para unirla con la otra sin perder datos."}
+            </p>
+            <div className="flex justify-end mt-4">
+              <button
+                onClick={() => setBlockedInfo(null)}
+                className="bg-pink-500 text-white px-6 py-2 rounded hover:bg-pink-600 transition"
+              >
+                Entendido
+              </button>
+            </div>
+          </>
+        )}
       </Modal>
 
       {/* Ventana de confirmación general */}
