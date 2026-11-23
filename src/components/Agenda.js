@@ -252,6 +252,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
 
   // Arrastrar y soltar turnos
   const [draggingId, setDraggingId] = useState(null);
+  const [moveConfirm, setMoveConfirm] = useState(null);
   const [dropTarget, setDropTarget] = useState(null);
 
   // Teléfonos que se están escribiendo desde la ventana del turno (por turno)
@@ -365,16 +366,9 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
       <span className="text-xs text-green-700">Enviado el {formatDayTime(sentAt)}</span>
     ) : null;
 
-    // Fuera de la ventana de envío (turno pasado o todavía lejano)
+    // Turno que ya pasó: no se ofrece el envío (y no se muestra ninguna leyenda)
     const reminder = getReminderWindow(appointment, now);
-    if (!reminder.open) {
-      return (
-        <>
-          <span className="text-xs text-gray-500">{reminder.reason}</span>
-          {sentInfo}
-        </>
-      );
-    }
+    if (!reminder.open) return sentInfo;
 
     const { url, error, needsPhone, patient } = getWhatsApp(appointment, patients, template, consultorios);
 
@@ -485,11 +479,22 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
     const dateKey = toDateKey(day);
     if (!appointment || !canMoveTo(dateKey, time)) return;
 
-    const when = day.toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" });
-    if (!window.confirm(`¿Mover el turno de ${appointment.patientName} al ${when} a las ${time}?`)) return;
+    const fmt = { weekday: "long", day: "numeric", month: "long" };
+    setMoveConfirm({
+      appointment,
+      dateKey,
+      time,
+      from: `${new Date(appointment.date + "T00:00:00").toLocaleDateString("es-AR", fmt)} a las ${appointment.time}`,
+      to: `${day.toLocaleDateString("es-AR", fmt)} a las ${time}`,
+    });
+  };
 
+  const confirmMove = () => {
+    if (!moveConfirm) return;
+    const { appointment, dateKey, time } = moveConfirm;
     runAction(async () => {
       await updateDoc(doc(db, "turnos", appointment.id), { date: dateKey, time, reminderSentAt: null });
+      setMoveConfirm(null);
     });
   };
 
@@ -715,7 +720,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
         confirmDeleteAppointment(selectedAppointmentDetails);
         setAppointmentModalOpen(false);
       },
-      className: "bg-red-500 text-white hover:bg-red-600",
+      className: "bg-red-50 text-red-700 border border-red-200 hover:bg-red-100",
     };
 
     if (isAdding) {
@@ -724,7 +729,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
       if (!isCompleted && !isCancelled) {
         actions = [
           baseAction,
-          { label: "Editar", onClick: () => setIsEditing(true), className: "bg-yellow-400 text-white hover:bg-yellow-500" },
+          { label: "Editar", onClick: () => setIsEditing(true), className: "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50" },
           {
             label: "Reprogramar",
             onClick: () => {
@@ -732,21 +737,21 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
               setNewTime("");
               setIsRescheduling(true);
             },
-            className: "bg-blue-500 text-white hover:bg-blue-600",
+            className: "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50",
           },
-          { label: "Cancelar", onClick: () => setIsCancelling(true), className: "bg-red-500 text-white hover:bg-red-600" },
+          { label: "Cancelar", onClick: () => setIsCancelling(true), className: "bg-red-50 text-red-700 border border-red-200 hover:bg-red-100" },
           deleteAction,
-          { label: "Finalizar", onClick: () => setIsFinishing(true), className: "bg-green-500 text-white hover:bg-green-600" },
+          { label: "Finalizar", onClick: () => setIsFinishing(true), className: "bg-pink-500 text-white hover:bg-pink-600" },
         ];
       } else if (isCompleted) {
         actions = [
           baseAction,
-          { label: "Actualizar notas", onClick: () => setIsFinishing(true), className: "bg-green-500 text-white hover:bg-green-600" },
+          { label: "Actualizar notas", onClick: () => setIsFinishing(true), className: "bg-pink-500 text-white hover:bg-pink-600" },
         ];
       } else if (isCancelled) {
         actions = [
           baseAction,
-          { label: "Reasignar", onClick: () => setIsReassigning(true), className: "bg-blue-500 text-white hover:bg-blue-600" },
+          { label: "Reasignar", onClick: () => setIsReassigning(true), className: "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50" },
           deleteAction,
         ];
       }
@@ -942,7 +947,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
               )}
               {selectedAppointmentDetails.notes && <p><strong>Notas:</strong> {selectedAppointmentDetails.notes}</p>}
               {selectedAppointmentDetails.status === "Confirmado" && (
-                <div className="mt-3 flex flex-wrap items-center gap-2">
+                <div className="mt-3 flex flex-wrap items-center gap-2 empty:hidden">
                   {renderWhatsApp(selectedAppointmentDetails)}
                 </div>
               )}
@@ -1120,12 +1125,12 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
                     {a.status}
                   </span>
                   {a.status === "Confirmado" && (
-                    <div className="mt-2 flex flex-wrap items-center gap-2">{renderWhatsApp(a)}</div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 empty:hidden">{renderWhatsApp(a)}</div>
                   )}
                 </div>
                 {(a.status === "Confirmado" || a.status === "Cancelado") && (
                   <button
-                    className="bg-red-500 text-white px-4 py-2 rounded text-sm hover:bg-red-600 transition"
+                    className="bg-red-50 text-red-700 border border-red-200 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-100 transition"
                     onClick={() => {
                       confirmDeleteAppointment(a);
                       setDailyModalOpen(false);
@@ -1154,7 +1159,7 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
                 {
                   label: "Restaurar original",
                   onClick: () => setTemplateDraft(DEFAULT_TEMPLATE),
-                  className: "bg-yellow-400 text-white hover:bg-yellow-500",
+                  className: "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50",
                 },
                 { label: "Guardar mensaje", onClick: saveTemplate },
               ]
@@ -1243,6 +1248,31 @@ const Agenda = ({ patients, turnos = [], consultorios, treatments }) => {
                 </div>
               );
             })}
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal: confirmar el movimiento de un turno arrastrado */}
+      <Modal
+        isOpen={moveConfirm !== null}
+        onClose={() => setMoveConfirm(null)}
+        title="Mover turno"
+        actions={[
+          { label: "Cancelar", onClick: () => setMoveConfirm(null), className: "bg-gray-300 text-gray-700 hover:bg-gray-400" },
+          { label: "Mover", onClick: confirmMove },
+        ]}
+      >
+        {moveConfirm && (
+          <div className="space-y-1">
+            <p>
+              <strong>Paciente:</strong> {moveConfirm.appointment.patientName}
+            </p>
+            <p>
+              <strong>De:</strong> {moveConfirm.from}
+            </p>
+            <p>
+              <strong>A:</strong> {moveConfirm.to}
+            </p>
           </div>
         )}
       </Modal>

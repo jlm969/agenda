@@ -176,6 +176,10 @@ const Pacientes = ({ patients = [], turnos = [] }) => {
   const [keepChoice, setKeepChoice] = useState({});
   const [merging, setMerging] = useState(false);
 
+  // Ventana de confirmación dentro de la app (en lugar del cartel del navegador)
+  const [confirmState, setConfirmState] = useState(null);
+  const askConfirm = (config) => setConfirmState(config);
+
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [historialClinico, setHistorialClinico] = useState(EMPTY_HISTORIAL);
   const [historialDirty, setHistorialDirty] = useState(false);
@@ -221,38 +225,45 @@ const Pacientes = ({ patients = [], turnos = [] }) => {
   const safeGroups = duplicateGroups.filter((g) => !g.conflict);
   const keepIdFor = (g) => (g.group.some((p) => p.id === keepChoice[g.key]) ? keepChoice[g.key] : bestToKeep(g.group).id);
 
-  const mergeOne = async (g) => {
+  const runMerge = async (ops, errorMessage) => {
     if (merging) return;
-    const removing = g.group.length - 1;
-    const message = `Se va a conservar 1 ficha de ${clean(g.group[0].name)} y eliminar ${removing} repetida${
-      removing > 1 ? "s" : ""
-    }. Esta acción no se puede deshacer. ¿Continuar?`;
-    if (!window.confirm(message)) return;
     setMerging(true);
     try {
-      await commitOps(buildMergeOps(g.group, keepIdFor(g)));
+      await commitOps(ops);
     } catch (error) {
       console.error("Error al unir pacientes:", error);
-      alert("No se pudo unir. Revisá tu conexión e intentá de nuevo.");
+      alert(errorMessage);
     } finally {
       setMerging(false);
     }
   };
 
-  const mergeAllSafe = async () => {
+  const mergeOne = (g) => {
+    if (merging) return;
+    const removing = g.group.length - 1;
+    const ops = buildMergeOps(g.group, keepIdFor(g));
+    askConfirm({
+      title: "Unir pacientes repetidos",
+      message: `Se va a conservar 1 ficha de ${clean(g.group[0].name)} y eliminar ${removing} repetida${
+        removing > 1 ? "s" : ""
+      }. Esta acción no se puede deshacer.`,
+      confirmLabel: "Unir y eliminar",
+      danger: true,
+      onConfirm: () => runMerge(ops, "No se pudo unir. Revisá tu conexión e intentá de nuevo."),
+    });
+  };
+
+  const mergeAllSafe = () => {
     if (merging || safeGroups.length === 0) return;
     const total = safeGroups.reduce((n, g) => n + g.group.length - 1, 0);
-    const message = `Se van a unir ${safeGroups.length} nombres repetidos y eliminar ${total} fichas repetidas. En cada caso se conserva la ficha con más datos y se le completan los que falten. Esta acción no se puede deshacer. ¿Continuar?`;
-    if (!window.confirm(message)) return;
-    setMerging(true);
-    try {
-      await commitOps(safeGroups.flatMap((g) => buildMergeOps(g.group, bestToKeep(g.group).id)));
-    } catch (error) {
-      console.error("Error al unir pacientes:", error);
-      alert("No se pudieron unir todos. Revisá tu conexión e intentá de nuevo.");
-    } finally {
-      setMerging(false);
-    }
+    const ops = safeGroups.flatMap((g) => buildMergeOps(g.group, bestToKeep(g.group).id));
+    askConfirm({
+      title: "Unir todos los repetidos",
+      message: `Se van a unir ${safeGroups.length} nombres repetidos y eliminar ${total} fichas repetidas. En cada caso se conserva la ficha con más datos y se le completan los que falten. Esta acción no se puede deshacer.`,
+      confirmLabel: "Unir y eliminar",
+      danger: true,
+      onConfirm: () => runMerge(ops, "No se pudieron unir todos. Revisá tu conexión e intentá de nuevo."),
+    });
   };
 
   // ---- Alta, edición y baja ----
@@ -285,7 +296,7 @@ const Pacientes = ({ patients = [], turnos = [] }) => {
     }
   };
 
-  const handleSavePatient = async () => {
+  const handleSavePatient = async (force = false) => {
     const name = String(newPatient.name || "").trim();
     if (!name) {
       alert("El nombre del paciente es obligatorio.");
@@ -294,11 +305,13 @@ const Pacientes = ({ patients = [], turnos = [] }) => {
     // Aviso si ya existe un paciente con ese nombre (evita crear repetidos sin querer)
     const original = editingPatientIndex !== null ? patients[editingPatientIndex] : null;
     const nameChanged = !original || normalize(original.name) !== normalize(name);
-    if (
-      nameChanged &&
-      patients.some((p) => normalize(p.name) === normalize(name)) &&
-      !window.confirm(`Ya hay un paciente llamado "${name}". ¿Querés guardarlo igual como otro paciente?`)
-    ) {
+    if (!force && nameChanged && patients.some((p) => normalize(p.name) === normalize(name))) {
+      askConfirm({
+        title: "Nombre repetido",
+        message: `Ya hay un paciente llamado "${name}". ¿Querés guardarlo igual como otro paciente?`,
+        confirmLabel: "Guardar igual",
+        onConfirm: () => handleSavePatient(true),
+      });
       return;
     }
     if (saving) return;
@@ -610,7 +623,7 @@ const Pacientes = ({ patients = [], turnos = [] }) => {
             Cancelar
           </button>
           <button
-            onClick={handleSavePatient}
+            onClick={() => handleSavePatient()}
             className="bg-pink-500 text-white px-4 sm:px-6 py-2 rounded hover:bg-pink-600 transition whitespace-nowrap"
           >
             {editingPatientIndex !== null ? "Guardar Cambios" : "Agregar Paciente"}
@@ -801,6 +814,31 @@ const Pacientes = ({ patients = [], turnos = [] }) => {
             className="bg-red-500 text-white px-4 sm:px-6 py-2 rounded hover:bg-red-600 transition"
           >
             Confirmar Eliminación
+          </button>
+        </div>
+      </Modal>
+
+      {/* Ventana de confirmación general */}
+      <Modal title={confirmState ? confirmState.title : ""} isOpen={confirmState !== null} onClose={() => setConfirmState(null)}>
+        <p className="text-gray-700">{confirmState ? confirmState.message : ""}</p>
+        <div className="flex justify-end gap-2 mt-4">
+          <button
+            onClick={() => setConfirmState(null)}
+            className="bg-gray-300 text-gray-700 px-4 sm:px-6 py-2 rounded hover:bg-gray-400 transition"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={() => {
+              const action = confirmState ? confirmState.onConfirm : null;
+              setConfirmState(null);
+              if (action) action();
+            }}
+            className={`text-white px-4 sm:px-6 py-2 rounded transition ${
+              confirmState && confirmState.danger ? "bg-red-500 hover:bg-red-600" : "bg-pink-500 hover:bg-pink-600"
+            }`}
+          >
+            {confirmState ? confirmState.confirmLabel || "Confirmar" : "Confirmar"}
           </button>
         </div>
       </Modal>
